@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Lighting - Dashboard | แดชบอร์ดสรุปงานบริการ</title>
+  <meta name="description" content="Live Lighting Dashboard - ระบบจัดการและสรุปงานบริการซ่อม รายงานได้ทันที" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+</head>
+<body>
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-wrap">
+        <div class="logo-icon">⚙️</div>
+        <div class="logo-text">
+          <span class="logo-title">Live Lighting</span>
+          <span class="logo-sub">ระบบจัดการงานบริการ</span>
+        </div>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="ย่อ/ขยาย Sidebar">
+        <span>◀</span>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Dashboard</span>
+      </a>
+      <a href="#" class="nav-item" data-page="jobs" onclick="showPage('jobs')">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">รายการงาน</span>
+      </a>
+      <a href="#" class="nav-item" data-page="add-job" onclick="showPage('add-job')">
+        <span class="nav-icon">➕</span>
+        <span class="nav-label">เพิ่มงานใหม่</span>
+      </a>
+      <a href="#" class="nav-item" data-page="report" onclick="showPage('report')">
+        <span class="nav-icon">📄</span>
+        <span class="nav-label">ออก Report</span>
+      </a>
+      <a href="#" class="nav-item" data-page="todo" onclick="showPage('todo')">
+        <span class="nav-icon">📝</span>
+        <span class="nav-label">To-Do List</span>
+      </a>
+      <a href="#" class="nav-item" data-page="travel-claim" onclick="showPage('travel-claim')">
+        <span class="nav-icon">🚗</span>
+        <span class="nav-label">เบิกค่าเดินทาง</span>
+      </a>
+      <a href="#" class="nav-item" data-page="ot-claim" onclick="showPage('ot-claim')">
+        <span class="nav-icon">⏰</span>
+        <span class="nav-label">เบิก OT</span>
+      </a>
+      <a href="#" class="nav-item" data-page="admin-settings" id="menu-admin-settings" onclick="showPage('admin-settings')">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">ตั้งค่าแอดมิน</span>
+      </a>
+      <a href="#" class="nav-item" onclick="logout()" style="margin-top: auto; border-top: 1px solid var(--border); padding-top: 12px; color: #f87171;">
+        <span class="nav-icon">🚪</span>
+        <span class="nav-label">ออกจากระบบ</span>
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="current-time" id="currentTime"></div>
+      <div class="version-label">v2.0 © 2026</div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-content" id="mainContent">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleSidebar()">☰</button>
+        <h1 class="page-title" id="pageTitle">📊 Dashboard สรุปงาน</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="user-profile" id="userProfileDisplay" style="display:flex; align-items:center; gap:8px; margin-right:12px; font-size:0.85rem; background:var(--bg-card2); padding:6px 12px; border-radius:18px; border:1px solid var(--border);">
+          <span style="font-size:1.1rem; display:flex; align-items:center;">👤</span>
+          <span id="displayUserName" style="font-weight:600; color:var(--text-primary);">สมชาย แสงดี</span>
+          <span id="displayUserRole" class="badge" style="font-size:0.7rem; padding:2px 6px; border-radius:10px;">ช่างเทคนิค</span>
+        </div>
+        <div class="search-box">
+          <input type="text" id="globalSearch" placeholder="🔍 ค้นหางาน / ลูกค้า..." oninput="handleSearch(this.value)" />
+        </div>
+        <div class="filter-group">
+          <select id="filterStatus" onchange="applyFilters()" class="filter-select">
+            <option value="">ทุกสถานะ</option>
+            <option value="pending">รอดำเนินการ</option>
+            <option value="in-progress">กำลังดำเนินการ</option>
+            <option value="completed">เสร็จแล้ว</option>
+            <option value="cancelled">ยกเลิก</option>
+          </select>
+          <input type="date" id="filterDateFrom" onchange="applyFilters()" class="filter-select" title="วันที่เริ่มต้น" />
+          <input type="date" id="filterDateTo" onchange="applyFilters()" class="filter-select" title="วันที่สิ้นสุด" />
+        </div>
+        <button class="btn-outline" onclick="openSheetsModal()" style="display:flex; align-items:center; gap:6px; font-size:0.85rem; padding:9px 12px; margin-right:8px; border-radius:var(--radius-sm); position:relative;">
+          <span id="syncStatusIcon">☁️</span> <span id="syncStatusText">เชื่อมต่อ Google Sheets</span>
+          <span id="syncQueueBadge" class="badge badge-pending-approval" style="display:none; margin-left:6px; font-size:0.75rem; padding:2px 6px; border-radius:10px;">0 รอซิงค์</span>
+        </button>
+        <button class="btn-primary" onclick="showPage('add-job')">+ เพิ่มงานใหม่</button>
+      </div>
+    </header>
+
+    <!-- Pages -->
+    <!-- ======================== DASHBOARD PAGE ======================== -->
+    <div id="page-dashboard" class="page active">
+      <!-- Period Selector -->
+      <div class="period-selector-bar">
+        <button id="btn-period-day" class="btn-period" onclick="changePeriod('day')">📅 รายวัน (Daily)</button>
+        <button id="btn-period-month" class="btn-period active" onclick="changePeriod('month')">📅 รายเดือน (Monthly)</button>
+        <button id="btn-period-year" class="btn-period" onclick="changePeriod('year')">📅 รายปี (Yearly)</button>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card kpi-blue" id="kpi-total">
+          <div class="kpi-icon">📋</div>
+          <div class="kpi-info">
+            <div class="kpi-value" id="kpiTotal">0</div>
+            <div class="kpi-label">งานทั้งหมด<br><small>Total Jobs</small></div>
+          </div>
+          <div class="kpi-trend" id="kpiTotalLabel">ช่วงเวลานี้</div>
+        </div>
+        <div class="kpi-card kpi-green" id="kpi-completed">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-info">
+            <div class="kpi-value" id="kpiCompleted">0</div>
+            <div class="kpi-label">งานเสร็จแล้ว<br><small>Completed</small></div>
+          </div>
+          <div class="kpi-trend" id="kpiCompletedRate">0%</div>
+        </div>
+        <div class="kpi-card kpi-orange" id="kpi-pending">
+          <div class="kpi-icon">⏳</div>
+          <div class="kpi-info">
+            <div class="kpi-value" id="kpiPending">0</div>
+            <div class="kpi-label">รอดำเนินการ<br><small>Pending</small></div>
+          </div>
+          <div class="kpi-trend">⏳ รอนัดหมาย</div>
+        </div>
+        <div class="kpi-card kpi-purple" id="kpi-inprogress">
+          <div class="kpi-icon">🔧</div>
+          <div class="kpi-info">
+            <div class="kpi-value" id="kpiInProgress">0</div>
+            <div class="kpi-label">กำลังดำเนินการ<br><small>In Progress</small></div>
+          </div>
+          <div class="kpi-trend">⚙️ ช่างกำลังดำเนินการ</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3>📈 สถิติจำนวนงาน <span class="chart-sub">Service Job Count</span></h3>
+            <select id="chartYearFilter" onchange="updateCharts()" class="filter-select-sm">
+              <option value="2026">2026</option>
+              <option value="2025">2025</option>
+            </select>
+          </div>
+          <div class="chart-container" style="position: relative; height: 260px; width: 100%;">
+            <canvas id="revenueChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3>🥧 สถิติสถานะงาน <span class="chart-sub">Job Status</span></h3>
+          </div>
+          <div class="chart-container" style="position: relative; height: 260px; width: 100%;">
+            <canvas id="statusChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Jobs Table -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3>🕐 งานล่าสุด <span class="chart-sub">Recent Jobs</span></h3>
+          <button class="btn-link" onclick="showPage('jobs')">ดูทั้งหมด →</button>
+        </div>
+        <div class="table-wrap">
+          <table id="recentTable">
+            <thead>
+              <tr>
+                <th>เลขที่งาน / Job No.</th>
+                <th>วันที่ / Date</th>
+                <th>ชื่อลูกค้า / Customer</th>
+                <th>ประเภทงาน / Type</th>
+                <th>สถานะ / Status</th>
+                <th>การดำเนินการ</th>
+              </tr>
+            </thead>
+            <tbody id="recentTableBody">
+              <tr><td colspan="6" class="empty-row">ยังไม่มีข้อมูล กรุณาเพิ่มงานใหม่</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== JOBS PAGE ======================== -->
+    <div id="page-jobs" class="page">
+      <div class="page-actions">
+        <div class="page-actions-left">
+          <h2 class="section-title">📋 รายการงานทั้งหมด <span class="count-badge" id="jobsCount">0 งาน</span></h2>
+        </div>
+        <div class="page-actions-right">
+          <button class="btn-outline" onclick="exportExcel()">📊 Export Excel</button>
+          <button class="btn-primary" onclick="showPage('add-job')">+ เพิ่มงานใหม่</button>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-wrap">
+          <table id="allJobsTable">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" /></th>
+                <th onclick="sortTable('jobNo')" class="sortable">เลขที่งาน ↕</th>
+                <th onclick="sortTable('date')" class="sortable">วันที่ ↕</th>
+                <th onclick="sortTable('customer')" class="sortable">ลูกค้า ↕</th>
+                <th onclick="sortTable('jobType')" class="sortable">ประเภทงาน ↕</th>
+                <th>ช่างผู้รับผิดชอบ</th>
+                <th>แผนที่</th>
+                <th onclick="sortTable('status')" class="sortable">สถานะ ↕</th>
+                <th>การดำเนินการ</th>
+              </tr>
+            </thead>
+            <tbody id="allJobsTableBody">
+              <tr><td colspan="9" class="empty-row">ยังไม่มีข้อมูล กรุณาเพิ่มงานใหม่</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== ADD JOB PAGE ======================== -->
+    <div id="page-add-job" class="page">
+      <div class="form-container">
+        <div class="form-header">
+          <h2 id="formTitle">➕ เพิ่มงานใหม่ <span class="chart-sub">Add New Service Job</span></h2>
+          <button class="btn-outline" onclick="showPage('jobs')">← กลับ</button>
+        </div>
+
+        <form id="jobForm" onsubmit="saveJob(event)">
+          <input type="hidden" id="editJobId" value="" />
+
+          <div class="form-section">
+            <h3 class="form-section-title">📌 ข้อมูลทั่วไป / General Information</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>เลขที่งาน / Job No. <span class="required">*</span></label>
+                <input type="text" id="jobNo" placeholder="เช่น SV-2026-001" required />
+              </div>
+              <div class="form-group">
+                <label>วันที่รับงาน / Date <span class="required">*</span></label>
+                <input type="date" id="jobDate" required />
+              </div>
+              <div class="form-group">
+                <label>วันที่นัดหมาย / Appointment</label>
+                <input type="date" id="appointmentDate" />
+              </div>
+              <div class="form-group">
+                <label>วันที่เสร็จงาน / Completion Date</label>
+                <input type="date" id="completionDate" />
+              </div>
+
+              <!-- ── Check-in / Check-out ── -->
+              <div class="form-group checkinout-group">
+                <label>⏱️ เวลาเช็คอิน / Check-in Time</label>
+                <div class="time-input-wrap">
+                  <input type="datetime-local" id="checkInTime" oninput="calcDuration()" />
+                  <button type="button" class="btn-stamp" onclick="stampNow('checkInTime')" title="บันทึกเวลาปัจจุบัน">
+                    🕐 ตอนนี้
+                  </button>
+                </div>
+              </div>
+              <div class="form-group checkinout-group">
+                <label>⏱️ เวลาเช็คเอาท์ / Check-out Time</label>
+                <div class="time-input-wrap">
+                  <input type="datetime-local" id="checkOutTime" oninput="calcDuration()" />
+                  <button type="button" class="btn-stamp" onclick="stampNow('checkOutTime')" title="บันทึกเวลาปัจจุบัน">
+                    🕐 ตอนนี้
+                  </button>
+                </div>
+              </div>
+
+              <!-- Duration display (full width) -->
+              <div class="form-group form-group-full">
+                <div class="duration-bar" id="durationBar" style="display:none;">
+                  <span class="duration-icon">⌛</span>
+                  <span class="duration-label">ระยะเวลาทำงาน / Duration:</span>
+                  <span class="duration-value" id="durationValue">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3 class="form-section-title">👤 ข้อมูลลูกค้า / Customer Information</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>ชื่อลูกค้า / Customer Name <span class="required">*</span></label>
+                <input type="text" id="customerName" placeholder="ชื่อ-นามสกุล หรือบริษัท" required />
+              </div>
+              <div class="form-group">
+                <label>เบอร์โทรศัพท์ / Phone <span class="required">*</span></label>
+                <input type="tel" id="customerPhone" placeholder="08X-XXX-XXXX" required />
+              </div>
+              <div class="form-group form-group-full">
+                <label>ที่อยู่ / Address</label>
+                <textarea id="customerAddress" rows="2" placeholder="ที่อยู่ลูกค้า"></textarea>
+              </div>
+              <div class="form-group form-group-full">
+                <label>📍 ลิ้งค์ Google Maps / Google Maps URL</label>
+                <input type="text" id="googleMapsUrl" placeholder="วางลิ้งค์แผนที่ Google Maps (เช่น https://maps.app.goo.gl/...)" oninput="parseGoogleMapsUrl(this.value)" />
+                <input type="hidden" id="customerLat" />
+                <input type="hidden" id="customerLng" />
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3 class="form-section-title">🔧 รายละเอียดงาน / Job Details</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>ประเภทงาน / Job Type <span class="required">*</span></label>
+                <select id="jobType" required>
+                  <option value="">-- เลือกประเภทงาน --</option>
+                  <option value="ซ่อม">ซ่อม (Repair)</option>
+                  <option value="ติดตั้ง">ติดตั้ง (Install)</option>
+                  <option value="PM">บำรุงรักษา PM (Maintenance)</option>
+                  <option value="ตรวจสอบ">ตรวจสอบ (Inspection)</option>
+                  <option value="ให้คำปรึกษา">ให้คำปรึกษา (Consulting)</option>
+                  <option value="อื่นๆ">อื่นๆ (Other)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>สถานะงาน / Status <span class="required">*</span></label>
+                <select id="jobStatus" required>
+                  <option value="pending">รอดำเนินการ (Pending)</option>
+                  <option value="in-progress">กำลังดำเนินการ (In Progress)</option>
+                  <option value="completed">เสร็จแล้ว (Completed)</option>
+                  <option value="cancelled">ยกเลิก (Cancelled)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>ช่างผู้รับผิดชอบ / Technician</label>
+                <input type="text" id="technician" placeholder="ชื่อช่าง" />
+              </div>
+              <div class="form-group">
+                <label>อุปกรณ์/เครื่องที่ซ่อม / Equipment</label>
+                <input type="text" id="equipment" placeholder="เช่น เครื่องปรับอากาศ, ปั๊มน้ำ" />
+              </div>
+              <div class="form-group form-group-full">
+                <label>รายละเอียดอาการ / Problem Description <span class="required">*</span></label>
+                <textarea id="problemDesc" rows="3" placeholder="อธิบายอาการเสีย/งานที่ต้องทำ" required></textarea>
+              </div>
+              <div class="form-group form-group-full">
+                <label>งานที่ดำเนินการ / Work Performed</label>
+                <textarea id="workPerformed" rows="3" placeholder="รายละเอียดงานที่ทำ"></textarea>
+              </div>
+              <div class="form-group form-group-full">
+                <label>สรุปการดำเนินงาน / Operation Summary</label>
+                <textarea id="operationSummary" rows="3" placeholder="สรุปภาพรวมการดำเนินงานหลังจากปฏิบัติหน้าที่เสร็จสิ้น"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3 class="form-section-title">📸 รูปภาพปฏิบัติงาน / Service Photos (สูงสุด 6 รูป)</h3>
+            <div class="form-grid photo-uploader-grid">
+              <div class="form-group">
+                <label>รูปภาพที่ 1 / Photo 1 (ปัญหา / Before)</label>
+                <input type="file" id="photo1" accept="image/*" onchange="previewImage(this, 1)" style="margin-bottom:8px;" />
+                <div id="preview-1" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>รูปภาพที่ 2 / Photo 2 (ระหว่างทำ / During)</label>
+                <input type="file" id="photo2" accept="image/*" onchange="previewImage(this, 2)" style="margin-bottom:8px;" />
+                <div id="preview-2" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>รูปภาพที่ 3 / Photo 3 (หลังเสร็จ / After)</label>
+                <input type="file" id="photo3" accept="image/*" onchange="previewImage(this, 3)" style="margin-bottom:8px;" />
+                <div id="preview-3" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>รูปภาพที่ 4 / Photo 4 (เพิ่มเติม 1)</label>
+                <input type="file" id="photo4" accept="image/*" onchange="previewImage(this, 4)" style="margin-bottom:8px;" />
+                <div id="preview-4" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>รูปภาพที่ 5 / Photo 5 (เพิ่มเติม 2)</label>
+                <input type="file" id="photo5" accept="image/*" onchange="previewImage(this, 5)" style="margin-bottom:8px;" />
+                <div id="preview-5" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>รูปภาพที่ 6 / Photo 6 (เพิ่มเติม 3)</label>
+                <input type="file" id="photo6" accept="image/*" onchange="previewImage(this, 6)" style="margin-bottom:8px;" />
+                <div id="preview-6" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3 class="form-section-title">📝 หมายเหตุ / Notes</h3>
+            <div class="form-grid">
+              <div class="form-group form-group-full">
+                <label>หมายเหตุ</label>
+                <textarea id="remarks" rows="2" placeholder="หมายเหตุเพิ่มเติม"></textarea>
+              </div>
+              <div class="form-group">
+                <label>อยู่ในรับประกัน / Under Warranty?</label>
+                <select id="isWarranty">
+                  <option value="no">ไม่ใช่ (No)</option>
+                  <option value="yes">ใช่ (Yes - Under Warranty)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn-outline" onclick="resetForm()">🔄 ล้างข้อมูล</button>
+            <button type="button" class="btn-outline" onclick="showPage('jobs')">❌ ยกเลิก</button>
+            <button type="submit" class="btn-primary btn-lg">💾 บันทึกข้อมูล</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ======================== REPORT PAGE ======================== -->
+    <div id="page-report" class="page">
+      <div class="page-actions">
+        <h2 class="section-title">📄 ออก Service Report <span class="chart-sub">Generate Report</span></h2>
+      </div>
+
+      <div class="report-layout">
+        <div class="report-controls">
+          <div class="control-card">
+            <h3>🔍 เลือกงานที่ต้องการออก Report</h3>
+            <div class="form-group">
+              <label>เลือกจาก Job No. / ลูกค้า</label>
+              <select id="reportJobSelect" onchange="loadReportData()" class="filter-select-wide">
+                <option value="">-- เลือกงาน --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>หรือกรอกเลขที่งาน</label>
+              <input type="text" id="reportJobSearch" placeholder="ค้นหา Job No. / ลูกค้า" oninput="filterReportJobs(this.value)" />
+            </div>
+          </div>
+
+          <div class="control-card">
+            <h3>🏢 ข้อมูลบริษัท / Company Info</h3>
+            <div class="form-group">
+              <label>ชื่อบริษัท / Company Name</label>
+              <input type="text" id="companyName" value="Live Lighting" />
+            </div>
+            <div class="form-group">
+              <label>ที่อยู่บริษัท / Address</label>
+              <textarea id="companyAddress" rows="2">123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110</textarea>
+            </div>
+            <div class="form-group">
+              <label>เบอร์โทร / Phone</label>
+              <input type="text" id="companyPhone" value="02-XXX-XXXX" />
+            </div>
+            <div class="form-group">
+              <label>เลขที่ผู้เสียภาษี / Tax ID</label>
+              <input type="text" id="companyTaxId" value="0-1234-56789-01-2" />
+            </div>
+          </div>
+
+          <div class="control-card">
+            <h3>⚙️ ตั้งค่า Report</h3>
+            <div class="form-group">
+              <label><input type="checkbox" id="showLogo" checked /> แสดงโลโก้บริษัท</label>
+            </div>
+            <div class="form-group">
+              <label><input type="checkbox" id="showSignature" checked /> แสดงช่องลายเซ็น</label>
+            </div>
+            <div class="form-group">
+              <label><input type="checkbox" id="showWarranty" checked /> แสดงสถานะการรับประกัน</label>
+            </div>
+            <div class="form-group">
+              <label>ภาษา Report</label>
+              <select id="reportLang" onchange="loadReportData()">
+                <option value="th">ภาษาไทย (Thai)</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <button class="btn-primary btn-full" onclick="generateReport()">🖨️ ออก PDF Report</button>
+            <button class="btn-outline btn-full" onclick="printReport()">🖨️ พิมพ์โดยตรง</button>
+          </div>
+        </div>
+
+        <!-- Report Preview -->
+        <div class="report-preview-wrap">
+          <div class="preview-header">
+            <h3>👁️ ตัวอย่าง Report</h3>
+            <div class="preview-actions">
+              <button class="btn-sm btn-primary" onclick="generateReport()">📥 Download PDF</button>
+            </div>
+          </div>
+          <div class="report-preview" id="reportPreview">
+            <div id="reportContent">
+              <!-- Report Template -->
+              <div class="report-page">
+                <div class="report-header-section">
+                  <div class="report-company" style="display:flex; align-items:center; gap:12px;">
+                    <div class="report-company-logo" id="rpt-company-logo-container" style="display:flex; align-items:center; justify-content:center; width:60px; height:50px; overflow:hidden;">
+                      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQsAAAC9CAYAAACksViOAAAQAElEQVR4AeydbYgd1RnHn9277mazxjWNu7G7q6kmoSpJSZq2WEJDCy1ShJaCGJDWplI1RYgfiklRjBA11Sg0lQqKlooN+SBa2w/9IAipCVIhEpMqxZe8sLrmZZOarHHdl+xmO//Zvbuzd+/MnDMvZ+bM/MM9mbdnnvOc3zPzvzNnzpindex" alt="Company Logo" id="rpt-logo-img" style="max-height: 50px; max-width: 60px; object-fit: contain;" onError="this.style.display='none'; document.getElementById('rpt-logo-fallback').style.display='inline-block';" />
+                      <span id="rpt-logo-fallback" style="display:none; font-size:2rem;">⚙️</span>
+                    </div>
+                    <div class="report-company-info">
+                      <h1 id="rpt-company-name">Live Lighting</h1>
+                      <p id="rpt-company-address">123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110</p>
+                      <p>📞 <span id="rpt-company-phone">02-XXX-XXXX</span> | เลขผู้เสียภาษี: <span id="rpt-company-tax">0-1234-56789-01-2</span></p>
+                    </div>
+                  </div>
+                  <div class="report-title-box">
+                    <div class="report-doc-title">ใบบันทึกการบริการ</div>
+                    <div class="report-doc-sub">SERVICE REPORT</div>
+                    <div class="report-doc-meta">
+                      <div>เลขที่: <strong id="rpt-job-no">-</strong></div>
+                      <div>วันที่: <strong id="rpt-date">-</strong></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="report-info-grid">
+                  <div class="report-info-section">
+                    <h4>ข้อมูลลูกค้า / Customer</h4>
+                    <table class="info-table">
+                      <tr><td>ชื่อลูกค้า</td><td><strong id="rpt-customer">-</strong></td></tr>
+                      <tr><td>เบอร์โทร</td><td id="rpt-phone">-</td></tr>
+                      <tr><td>ที่อยู่</td><td id="rpt-address">-</td></tr>
+                    </table>
+                  </div>
+                  <div class="report-info-section">
+                    <h4>ข้อมูลงาน / Job Info</h4>
+                    <table class="info-table">
+                      <tr><td>ประเภทงาน</td><td id="rpt-job-type">-</td></tr>
+                      <tr><td>ช่างผู้รับผิดชอบ</td><td id="rpt-technician">-</td></tr>
+                      <tr><td>อุปกรณ์</td><td id="rpt-equipment">-</td></tr>
+                      <tr><td>วันที่นัดหมาย</td><td id="rpt-appointment">-</td></tr>
+                      <tr><td>วันที่เสร็จงาน</td><td id="rpt-completion">-</td></tr>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="report-section">
+                  <h4 id="rpt-problem-title">ปัญหา / Problem</h4>
+                  <div class="report-text-box" id="rpt-problem">-</div>
+                </div>
+
+                <div class="report-section">
+                  <h4 id="rpt-work-title">งานที่ดำเนินการ / Onsite Work</h4>
+                  <div class="report-text-box" id="rpt-work">-</div>
+                </div>
+
+                <div class="report-section" id="rpt-summary-section">
+                  <h4 id="rpt-summary-title">สรุป / Summary</h4>
+                  <div class="report-text-box" id="rpt-operation-summary">-</div>
+                </div>
+
+                <div class="report-section" id="rpt-warranty-section">
+                  <div class="warranty-status-box" style="display:flex; justify-content:space-between; padding:8px 12px; background:rgba(46,207,125,0.06); border:1px solid rgba(46,207,125,0.15); border-radius:6px; font-weight:600;">
+                    <span>การรับประกัน / Warranty Status:</span>
+                    <span id="rpt-warranty-val" style="color:#2ecf7d;">-</span>
+                  </div>
+                </div>
+
+                <div class="report-section" id="rpt-remarks-section">
+                  <div class="report-text-box" id="rpt-remarks" style="min-height:30px;"></div>
+                </div>
+
+                <div class="report-section" id="rpt-photos-section">
+                  <h4 id="rpt-photos-title">รูปภาพการปฏิบัติงาน / Photo</h4>
+                  <div class="report-photos-grid" id="rpt-photos-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:10px;">
+                    <!-- Dynamic photos list -->
+                  </div>
+                </div>
+
+                <div class="signature-section" id="rpt-signature-section">
+                  <div class="signature-box">
+                    <div class="sig-line"></div>
+                    <div>ช่างผู้ให้บริการ / Technician</div>
+                    <div class="sig-date">วันที่ ____________</div>
+                  </div>
+                  <div class="signature-box">
+                    <div class="sig-line"></div>
+                    <div>ผู้จัดการ / Manager</div>
+                    <div class="sig-date">วันที่ ____________</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== TO-DO LIST PAGE ======================== -->
+    <div id="page-todo" class="page">
+      <div class="card" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <h2 style="font-size:1.25rem; font-weight:700; margin:0;">📝 รายการสิ่งที่ต้องทำ / To-Do List</h2>
+            <p style="font-size:0.85rem; color:var(--text-secondary); margin:4px 0 0;">จัดการและเพิ่มข้อมูลการทำงานใน Google Sheets</p>
+          </div>
+          <a href="https://docs.google.com/spreadsheets/d/1Ci_1jgv0wxZipBqjVBmIxX-1jplW4mnPHaZzmVODXPs/edit?gid=651189864#gid=651189864" 
+             target="_blank" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+            🔗 เปิดใน Google Sheets
+          </a>
+        </div>
+        <div style="border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:#ffffff; box-shadow:var(--shadow-sm);">
+          <iframe src="https://docs.google.com/spreadsheets/d/1Ci_1jgv0wxZipBqjVBmIxX-1jplW4mnPHaZzmVODXPs/edit?gid=651189864&chrome=false&widget=false" 
+                  style="width:100%; height:700px; border:none; display:block;"
+                  allow="autoplay"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== MAP PAGE ======================== -->
+    <!-- ======================== TRAVEL CLAIM PAGE ======================== -->
+    <div id="page-travel-claim" class="page">
+      <div class="report-layout">
+        <div class="report-controls">
+          <div class="control-card">
+            <h3>🚗 บันทึกใบเบิกค่าเดินทาง / Travel Claim Form</h3>
+            <form id="travelForm" onsubmit="saveTravelClaim(event)">
+              <input type="hidden" id="editTravelClaimId" value="" />
+              <div class="form-group">
+                <label>เลขที่ใบเบิก / Claim No.</label>
+                <input type="text" id="travelClaimNo" placeholder="TC-XXXX-XXX" required />
+              </div>
+              <div class="form-group">
+                <label>วันที่เบิก / Date</label>
+                <input type="date" id="travelDate" required />
+              </div>
+              <div class="form-group">
+                <label>อ้างอิงเลขใบงาน / Ref Job No.</label>
+                <select id="travelRefJob" class="filter-select-wide" onchange="autoFillTravelAddress()" required>
+                  <option value="">-- เลือกใบงานอ้างอิง --</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>จุดเริ่มต้น / Start Point</label>
+                <input type="text" id="travelStart" value="สำนักงานใหญ่ (HQ)" required />
+              </div>
+              <div class="form-group">
+                <label>จุดสิ้นสุด / End Point</label>
+                <input type="text" id="travelEnd" placeholder="จุดหมายปลายทาง" required />
+              </div>
+              <div class="form-group">
+                <label>📍 แนบลิ้งค์ Google Map เพื่อคำนวณระยะทาง</label>
+                <input type="text" id="travelMapUrl" placeholder="วางลิ้งค์แผนที่ Google Maps (เช่น https://maps.app.goo.gl/...)" oninput="parseTravelMapUrl(this.value)" />
+                <div class="map-link-display" id="travelMapDisplay" style="display:none; margin-top:8px; flex-direction:column; gap:8px;">
+                  <a href="#" id="travelMapAnchor" target="_blank" style="font-weight:600;">🗺️ ดูเส้นทางแผนที่</a>
+                  <div style="width:100%; height:180px; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; background:#fafafa;">
+                    <img id="travelMapPreviewImg" src="" style="width:100%; height:100%; object-fit:cover; display:block;" />
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>ระยะทางจาก Google Map (กม.) / Distance (km)</label>
+                <input type="number" id="travelDistance" step="0.1" min="0" placeholder="เช่น 24.5" oninput="calcTravelAmount()" required />
+              </div>
+              <div class="form-group">
+                <label>อัตราเบิกต่อ กม. / Rate per km (฿)</label>
+                <input type="number" id="travelRate" step="0.5" min="0" value="5" oninput="calcTravelAmount()" required />
+              </div>
+              <div class="form-group">
+                <label>ค่าทางด่วน/ค่าจอดรถ / Toll/Parking fee (฿)</label>
+                <input type="number" id="travelTolls" step="1" min="0" value="0" oninput="calcTravelAmount()" />
+              </div>
+              <div class="form-group">
+                <label>รวมเงิน / Total (฿)</label>
+                <input type="number" id="travelTotal" readonly style="font-weight:bold; color:var(--accent-green);" />
+              </div>
+              <div class="form-group">
+                <label>หมายเหตุ / Remarks</label>
+                <input type="text" id="travelRemarks" placeholder="ระบุเหตุผลในการเดินทาง" />
+              </div>
+              <div style="display:flex; gap:8px; margin-top:12px;">
+                <button type="button" class="btn-outline btn-full" onclick="resetTravelForm()">ล้างข้อมูล</button>
+                <button type="submit" class="btn-primary btn-full">💾 บันทึก</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="report-preview-wrap">
+          <div class="preview-header">
+            <h3>📋 รายการใบเบิกค่าเดินทาง / Travel Claims</h3>
+          </div>
+          <div class="table-card" style="margin-top:0;">
+            <div class="table-wrap">
+              <table id="travelClaimsTable">
+                <thead>
+                  <tr>
+                    <th>เลขที่ใบเบิก</th>
+                    <th>วันที่</th>
+                    <th>ใบงานอ้างอิง</th>
+                    <th>ระยะทาง</th>
+                    <th>ค่าทางด่วน</th>
+                    <th>ยอดเบิกสุทธิ</th>
+                    <th>สถานะ</th>
+                    <th>การดำเนินการ</th>
+                  </tr>
+                </thead>
+                <tbody id="travelClaimsTableBody">
+                  <tr><td colspan="8" class="empty-row">ยังไม่มีประวัติการเบิก</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== OT CLAIM PAGE ======================== -->
+    <div id="page-ot-claim" class="page">
+      <div class="report-layout">
+        <div class="report-controls">
+          <div class="control-card">
+            <h3>⏰ บันทึกใบเบิก OT / OT Claim Form</h3>
+            <form id="otForm" onsubmit="saveOtClaim(event)">
+              <input type="hidden" id="editOtClaimId" value="" />
+              <div class="form-group">
+                <label>เลขที่ใบเบิก / Claim No.</label>
+                <input type="text" id="otClaimNo" placeholder="OT-XXXX-XXX" required />
+              </div>
+              <div class="form-group">
+                <label>วันที่เบิก / Date</label>
+                <input type="date" id="otDate" required />
+              </div>
+              <div class="form-group">
+                <label>อ้างอิงเลขใบงาน / Ref Job No.</label>
+                <select id="otRefJob" class="filter-select-wide" onchange="autoFillOtEmployee()" required>
+                  <option value="">-- เลือกใบงานอ้างอิง --</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>ชื่อพนักงาน / Employee Name</label>
+                <input type="text" id="otEmployee" placeholder="ระบุชื่อพนักงาน/ช่าง" required />
+              </div>
+              <div class="form-group">
+                <label>วันที่ทำ OT / Work Date</label>
+                <input type="date" id="otWorkDate" required />
+              </div>
+              <div class="form-group">
+                <label>เวลาเริ่มต้น / Start Time</label>
+                <input type="time" id="otStart" oninput="calcOtHours()" required />
+              </div>
+              <div class="form-group">
+                <label>เวลาสิ้นสุด / End Time</label>
+                <input type="time" id="otEnd" oninput="calcOtHours()" required />
+              </div>
+              <div class="form-group">
+                <label>จำนวนชั่วโมง OT / Hours</label>
+                <input type="number" id="otHours" step="0.1" readonly placeholder="คำนวณอัตโนมัติ" />
+              </div>
+              <div class="form-group">
+                <label>ตัวคูณเวลา / Multiplier (เท่า)</label>
+                <input type="number" id="otMultiplier" step="0.1" min="1" value="1.5" required />
+              </div>
+              <div class="form-group">
+                <label>ค่าเบี้ยเลี้ยง / Allowance (฿)</label>
+                <input type="number" id="otAllowance" step="1" min="0" value="0" required />
+              </div>
+              <div class="form-group">
+                <label>หมายเหตุ / Remarks</label>
+                <input type="text" id="otRemarks" placeholder="ระบุเหตุผลเพิ่มเติม" />
+              </div>
+              <div style="display:flex; gap:8px; margin-top:12px;">
+                <button type="button" class="btn-outline btn-full" onclick="resetOtForm()">ล้างข้อมูล</button>
+                <button type="submit" class="btn-primary btn-full">💾 บันทึก</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="report-preview-wrap">
+          <div class="preview-header">
+            <h3>📋 รายการใบเบิก OT / Overtime Claims</h3>
+          </div>
+          <div class="table-card" style="margin-top:0;">
+            <div class="table-wrap">
+              <table id="otClaimsTable">
+                <thead>
+                  <tr>
+                    <th>เลขที่ใบเบิก</th>
+                    <th>วันที่เบิก</th>
+                    <th>ใบงานอ้างอิง</th>
+                    <th>พนักงาน</th>
+                    <th>เวลาทำงาน</th>
+                    <th>จำนวนชั่วโมง</th>
+                    <th>ตัวคูณ</th>
+                    <th>เบี้ยเลี้ยง</th>
+                    <th>สถานะ</th>
+                    <th>การดำเนินการ</th>
+                  </tr>
+                </thead>
+                <tbody id="otClaimsTableBody">
+                  <tr><td colspan="10" class="empty-row">ยังไม่มีประวัติการเบิก</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======================== ADMIN SETTINGS PAGE ======================== -->
+    <div id="page-admin-settings" class="page">
+      <div class="report-layout">
+        <div class="report-controls">
+          <div class="control-card">
+            <h3>🔔 ตั้งค่าระบบแจ้งเตือน / Line Notify</h3>
+            <div class="form-group">
+              <label>Line Notify Token</label>
+              <input type="text" id="lineNotifyToken" placeholder="วาง Token ที่ได้จาก Line Notify" />
+            </div>
+            <button class="btn-primary btn-full" onclick="testLineNotify()">⚡ ทดสอบส่ง Line Notify</button>
+          </div>
+
+          <div class="control-card">
+            <h3>🏢 ข้อมูลบริษัท / Live Lighting Info</h3>
+            <div class="form-group">
+              <label>ชื่อบริษัท / Company Name</label>
+              <input type="text" id="settingsCompanyName" value="Live Lighting" />
+            </div>
+            <div class="form-group">
+              <label>ที่อยู่บริษัท / Address</label>
+              <textarea id="settingsCompanyAddress" rows="2">123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110</textarea>
+            </div>
+            <button class="btn-primary btn-full" onclick="saveAdminCompanySettings()">💾 บันทึกข้อมูลบริษัท</button>
+          </div>
+
+          <div class="control-card">
+            <h3>👥 เพิ่มพนักงานใหม่ / Add Employee</h3>
+            <form id="addEmployeeForm" onsubmit="handleAddEmployee(event)">
+              <div class="form-group">
+                <label>ชื่อพนักงาน / Name</label>
+                <input type="text" id="newEmpName" required placeholder="เช่น สมชาย แสงดี" />
+              </div>
+              <div class="form-group">
+                <label>อีเมล / Email</label>
+                <input type="email" id="newEmpEmail" required placeholder="เช่น somchai@livelighting.com" />
+              </div>
+              <div class="form-group">
+                <label>บทบาท / Role</label>
+                <select id="newEmpRole" required>
+                  <option value="technician">ช่างเทคนิค (Technician)</option>
+                  <option value="manager">ผู้จัดการ (Manager)</option>
+                  <option value="admin">ผู้ดูแลระบบ/บัญชี (Admin)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn-primary btn-full">➕ เพิ่มพนักงาน</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="report-preview-wrap">
+          <div class="preview-header">
+            <h3>👥 พนักงานและบทบาทในระบบ / Employees & Roles</h3>
+          </div>
+          <div class="table-card" style="margin-top:0;">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ชื่อพนักงาน</th>
+                    <th>อีเมลเข้าใช้งาน</th>
+                    <th>บทบาท / Role</th>
+                    <th>การดำเนินการ</th>
+                  </tr>
+                </thead>
+                <tbody id="employeeTableBody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <!-- Payroll Summary Section -->
+          <div class="preview-header" style="margin-top:30px;">
+            <h3>📊 สรุปยอดจ่ายเงินเดือน & ใบเบิก / Payroll & Claims Summary</h3>
+          </div>
+          <div class="table-card" style="margin-top:0;">
+            <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+              <span style="font-size:0.8rem; color:var(--text-secondary);">คำนวณสะสมจากใบเบิกค่าเดินทาง/OT เฉพาะที่สถานะ <strong style="color:var(--accent-green);">อนุมัติแล้ว (Approved)</strong></span>
+              <button class="btn-success" onclick="exportPayrollCSV()" style="font-size:0.8rem; padding:8px 12px; display:flex; align-items:center; gap:6px; border-radius:var(--radius-sm);">
+                📥 ดาวน์โหลดข้อมูลฝ่ายบัญชี (CSV)
+              </button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ชื่อพนักงาน</th>
+                    <th>เบิกเดินทางอนุมัติ (บาท)</th>
+                    <th>ชั่วโมง OT สะสม (ชม.)</th>
+                    <th>เบี้ยเลี้ยง OT (บาท)</th>
+                    <th>รวมยอดจ่ายเบิก (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody id="payrollTableBody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Modal: View/Edit Job -->
+  <div class="modal-overlay" id="jobModal" onclick="closeModal(event)">
+    <div class="modal-box" id="jobModalBox">
+      <div class="modal-header">
+        <h3 id="modalTitle">รายละเอียดงาน</h3>
+        <button class="modal-close" onclick="closeJobModal()">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn-outline" onclick="closeJobModal()">ปิด</button>
+        <button class="btn-primary" id="modalEditBtn" onclick="editJobFromModal()">✏️ แก้ไข</button>
+        <button class="btn-danger" id="modalDeleteBtn" onclick="deleteJobFromModal()">🗑️ ลบ</button>
+        <button class="btn-success" id="modalReportBtn" onclick="reportJobFromModal()">📄 ออก Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: View Claim Details & Approval -->
+  <div class="modal-overlay" id="claimModal" onclick="closeModal(event)">
+    <div class="modal-box" id="claimModalBox" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 id="claimModalTitle">รายละเอียดใบเบิกเงิน / Claim Details</h3>
+        <button class="modal-close" onclick="closeClaimModal()">✕</button>
+      </div>
+      <div class="modal-body" id="claimModalBody" style="font-size:0.9rem; line-height:1.6;">
+        <!-- Dynamically populated details -->
+      </div>
+      <div class="modal-footer" id="claimModalFooter" style="display:flex; justify-content:flex-end; gap:8px; padding-top:15px; border-top:1px solid var(--border);">
+        <!-- Dynamic Approve / Reject / PDF buttons depending on role and status -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Google Sheets Sync Settings -->
+  <div class="modal-overlay" id="sheetsModal" onclick="closeModal(event)">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>☁️ เชื่อมต่อ Google Sheets Database</h3>
+        <button class="modal-close" onclick="closeSheetsModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="form-group">
+            <label style="font-weight:600; color:var(--text-primary);">Google Apps Script Web App URL:</label>
+            <input type="url" id="sheetsApiUrl" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%; padding:10px; margin-top:6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
+          </div>
+          
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; gap:8px;">
+              <button class="btn-primary" onclick="testAndSyncSheets()" style="flex:1;">💾 บันทึกและเชื่อมต่อ</button>
+              <button class="btn-danger" onclick="disconnectSheets()" style="flex:1;">🔌 ยกเลิกการเชื่อมต่อ</button>
+            </div>
+            <button class="btn-success" id="syncPendingBtn" onclick="syncPendingQueue()" style="width:100%; display:none; align-items:center; justify-content:center; gap:8px;">🔄 ซิงค์รายการคงค้างที่รอดำเนินการ (0)</button>
+          </div>
+          
+          <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
+          
+          <h4 style="margin:0; font-weight:600; color:var(--accent-blue);">💡 ขั้นตอนการติดตั้งและการเชื่อมต่อ:</h4>
+          <ol style="margin:0; padding-left:20px; font-size:0.82rem; line-height:1.6; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;">
+            <li>สร้าง **Google Sheet** เปล่าขึ้นมา 1 ไฟล์</li>
+            <li>ที่เมนูด้านบน คลิก **ส่วนขยาย (Extensions) > Apps Script**</li>
+            <li>ลบโค้ดเก่าออก แล้ววางโค้ดจากปุ่มด้านล่างนี้ลงไป</li>
+            <li>คลิก **การทำให้ใช้งานได้ (Deploy) > การทำให้ใช้งานได้ใหม่ (New Deployment)**</li>
+            <li>เลือกประเภทเป็น **เว็บแอป (Web App)**</li>
+            <li>ตั้งค่าการเข้าถึง: **เรียกใช้เป็น (Execute as): "ฉัน (Me)"** และ **ผู้มีสิทธิ์เข้าถึง (Who has access): "ทุกคน (Anyone)"**</li>
+            <li>คลิก **Deploy (ทำให้ใช้งานได้)** จากนั้นคัดลอก **URL เว็บแอป (Web App URL)** มาวางลงในช่องด้านบน</li>
+          </ol>
+          
+          <button class="btn-outline" onclick="copyAppsScriptCode()" style="margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px; width:100%;">
+            📋 คัดลอกโค้ด Google Apps Script
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-outline" onclick="closeSheetsModal()">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login Overlay Screen -->
+  <div id="loginOverlay" class="login-overlay active">
+    <div class="login-box">
+      <div class="login-header">
+        <span style="font-size:2.5rem; display:block; margin-bottom:8px;">⚙️</span>
+        <h2>Live Lighting</h2>
+        <p>ระบบจัดการงานบริการ & ใบเบิกค่าเดินทาง/OT</p>
+      </div>
+      <form id="loginForm" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group" style="text-align:left;">
+          <label>อีเมลเข้าใช้งาน / Username Email</label>
+          <input type="email" id="loginEmail" required placeholder="เช่น somchai@livelighting.com" />
+        </div>
+        <div class="form-group" style="text-align:left;">
+          <label>รหัสผ่าน / Password</label>
+          <input type="password" id="loginPassword" required placeholder="กรอกรหัสผ่าน (ระบุ 123456 สำหรับ Demo)" />
+        </div>
+        <button type="submit" class="btn-primary btn-full btn-lg" style="margin-top:12px;">🔓 เข้าสู่ระบบ</button>
+      </form>
+      
+      <div class="login-divider" style="margin:20px 0; border-bottom:1px solid var(--border); position:relative; text-align:center;">
+        <span style="background:var(--bg-card); padding:0 10px; font-size:0.75rem; color:var(--text-secondary); position:relative; top:-9px;">หรือทดลองใช้งานระบบผ่าน Demo Accounts</span>
+      </div>
+      <div class="demo-buttons">
+        <button class="btn-outline btn-full" onclick="quickLogin('technician')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <span>👤</span> ช่างเทคนิค (สมชาย แสงดี)
+        </button>
+        <button class="btn-outline btn-full" onclick="quickLogin('manager')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <span>💼</span> ผู้จัดการ/หัวหน้า (วิชัย)
+        </button>
+        <button class="btn-outline btn-full" onclick="quickLogin('admin')" style="display:flex; align-items:center; justify-content:center; gap:8px;">
+          <span>👑</span> แอดมิน/บัญชี (Live Lighting)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Test Role Switcher -->
+  <div class="role-switcher-widget" id="roleSwitcherWidget">
+    <div class="widget-title">⚙️ สลับสิทธิ์ทดสอบ</div>
+    <div class="widget-body" style="display:flex; gap:6px;">
+      <button class="btn-period active" id="switch-role-technician" onclick="switchRole('technician')">ช่าง</button>
+      <button class="btn-period" id="switch-role-manager" onclick="switchRole('manager')">ผจก.</button>
+      <button class="btn-period" id="switch-role-admin" onclick="switchRole('admin')">แอดมิน</button>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
