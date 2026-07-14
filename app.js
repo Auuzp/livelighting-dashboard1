@@ -42,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Load data from Google Sheets if connection URL is configured
   loadDataFromSheets();
+
+  // Initialize Sheets warning banner visibility
+  setTimeout(updateSheetsWarningBanner, 200);
 });
 
 // ── Authentication & Roles Logic ──
@@ -691,7 +694,8 @@ function saveJob(e) {
     operationSummary: v('operationSummary'),
     isWarranty: v('isWarranty') || 'no',
     remarks: v('remarks'),
-    photos: [...jobPhotos]
+    photos: [...jobPhotos],
+    signature: v('jobSignature')
   };
 
   // Reset temporary GPS caches
@@ -739,12 +743,19 @@ function editJob(id) {
     setVal('operationSummary', job.operationSummary || '');
     setVal('remarks', job.remarks);
     setVal('isWarranty', job.isWarranty || 'no');
+    setVal('jobSignature', job.signature || '');
 
     // Set photos state
     for (let i = 0; i < 6; i++) {
       jobPhotos[i] = (job.photos && job.photos[i]) ? job.photos[i] : '';
       updatePhotoPreview('preview-' + (i + 1), jobPhotos[i]);
     }
+
+    // Load signature image to canvas
+    loadSignatureToCanvas(job.signature);
+    
+    // Switch to first tab by default
+    switchJobFormTab(0);
 
     calcDuration();
   }, 50);
@@ -782,6 +793,12 @@ function resetForm() {
     const fileInput = document.getElementById('photo' + i);
     if (fileInput) fileInput.value = '';
   }
+
+  // Clear signature canvas
+  clearSignatureCanvas();
+  
+  // Reset tabs to Tab 0
+  switchJobFormTab(0);
 }
 
 // ── Check-in / Check-out ──
@@ -1181,6 +1198,18 @@ function loadReportData() {
   document.getElementById('rpt-company-logo-container').style.display = document.getElementById('showLogo').checked ? 'flex' : 'none';
   document.getElementById('rpt-warranty-section').style.display = document.getElementById('showWarranty').checked ? '' : 'none';
   document.getElementById('rpt-signature-section').style.display = document.getElementById('showSignature').checked ? '' : 'none';
+
+  // Inject digital signature
+  const clientSigEl = document.getElementById('rpt-sig-line-client');
+  if (clientSigEl) {
+    if (job.signature) {
+      clientSigEl.innerHTML = `<img src="${job.signature}" style="max-height:48px; max-width:200px; object-fit:contain;" />`;
+      clientSigEl.style.borderBottom = 'none';
+    } else {
+      clientSigEl.innerHTML = '';
+      clientSigEl.style.borderBottom = '1px solid #333';
+    }
+  }
 }
 
 function setText(id, val) {
@@ -2212,6 +2241,7 @@ async function testAndSyncSheets() {
     if (result.success) {
       sheetsApiUrl = url;
       localStorage.setItem('servicell1_sheets_url', url);
+      updateSheetsWarningBanner();
       showToast('✅ เชื่อมต่อ Google Sheets สำเร็จ!', 'success');
       
       if (result.jobs && (result.jobs.length > 0 || result.travelClaims.length > 0 || result.otClaims.length > 0)) {
@@ -2249,6 +2279,7 @@ function disconnectSheets() {
   localStorage.removeItem('servicell1_sheets_url');
   document.getElementById('sheetsApiUrl').value = '';
   updateSyncStatus('disconnected');
+  updateSheetsWarningBanner();
   showToast('🔌 ยกเลิกการเชื่อมต่อ Google Sheets แล้ว', 'info');
   closeSheetsModal();
 }
@@ -2911,4 +2942,210 @@ function exportPayrollCSV() {
   link.click();
   document.body.removeChild(link);
   showToast('📥 ดาวน์โหลดไฟล์ CSV ฝ่ายบัญชีเรียบร้อย', 'success');
+}
+
+// ==========================================================================
+// CORPORATE DASHBOARD POLISH & ADVANCED UX FUNCTIONS
+// ==========================================================================
+
+// 1. Form Tab Switching
+function switchJobFormTab(index) {
+  for (let i = 0; i < 4; i++) {
+    const pane = document.getElementById('jobFormTab' + i);
+    const btn = document.getElementById('formTabBtn' + i);
+    if (pane) pane.style.display = 'none';
+    if (btn) {
+      btn.style.color = 'var(--text-secondary)';
+      btn.style.borderBottomColor = 'transparent';
+      btn.classList.remove('active');
+    }
+  }
+  
+  const activePane = document.getElementById('jobFormTab' + index);
+  const activeBtn = document.getElementById('formTabBtn' + index);
+  if (activePane) activePane.style.display = 'block';
+  if (activeBtn) {
+    activeBtn.style.color = 'var(--accent-blue)';
+    activeBtn.style.borderBottomColor = 'var(--accent-blue)';
+    activeBtn.classList.add('active');
+  }
+
+  // If Tab 3 is active, initialize canvas
+  if (index === 3) {
+    setTimeout(initSignatureCanvas, 50);
+  }
+}
+
+// 2. HTML5 Canvas Signature Drawing
+let isDrawing = false;
+let sigCanvas = null;
+let sigCtx = null;
+
+function initSignatureCanvas() {
+  sigCanvas = document.getElementById('signatureCanvas');
+  if (!sigCanvas) return;
+  
+  // Set explicit display size to prevent scale issues on high-DPI displays
+  sigCtx = sigCanvas.getContext('2d');
+  sigCtx.strokeStyle = '#1e293b';
+  sigCtx.lineWidth = 2.5;
+  sigCtx.lineCap = 'round';
+  sigCtx.lineJoin = 'round';
+
+  // Event Listeners for drawing
+  sigCanvas.addEventListener('mousedown', startDrawing);
+  sigCanvas.addEventListener('mousemove', draw);
+  sigCanvas.addEventListener('mouseup', stopDrawing);
+  sigCanvas.addEventListener('mouseleave', stopDrawing);
+
+  // Mobile Touch Drawing Support
+  sigCanvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = sigCanvas.getBoundingClientRect();
+      isDrawing = true;
+      sigCtx.beginPath();
+      sigCtx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+    }
+  }, { passive: false });
+
+  sigCanvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (isDrawing && e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = sigCanvas.getBoundingClientRect();
+      sigCtx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+      sigCtx.stroke();
+    }
+  }, { passive: false });
+
+  sigCanvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    stopDrawing();
+  }, { passive: false });
+}
+
+function startDrawing(e) {
+  isDrawing = true;
+  const rect = sigCanvas.getBoundingClientRect();
+  sigCtx.beginPath();
+  sigCtx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function draw(e) {
+  if (!isDrawing) return;
+  const rect = sigCanvas.getBoundingClientRect();
+  sigCtx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+  sigCtx.stroke();
+}
+
+function stopDrawing() {
+  if (isDrawing) {
+    isDrawing = false;
+    const input = document.getElementById('jobSignature');
+    if (input && sigCanvas) {
+      input.value = sigCanvas.toDataURL('image/png');
+    }
+  }
+}
+
+function clearSignatureCanvas() {
+  sigCanvas = document.getElementById('signatureCanvas');
+  if (sigCanvas) {
+    const ctx = sigCanvas.getContext('2d');
+    ctx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
+  }
+  const input = document.getElementById('jobSignature');
+  if (input) input.value = '';
+}
+
+function loadSignatureToCanvas(base64Image) {
+  if (!base64Image) {
+    setTimeout(clearSignatureCanvas, 100);
+    return;
+  }
+  setTimeout(() => {
+    sigCanvas = document.getElementById('signatureCanvas');
+    if (!sigCanvas) return;
+    sigCtx = sigCanvas.getContext('2d');
+    const img = new Image();
+    img.onload = function() {
+      sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
+      sigCtx.drawImage(img, 0, 0);
+    };
+    img.src = base64Image;
+    const input = document.getElementById('jobSignature');
+    if (input) input.value = base64Image;
+  }, 100);
+}
+
+// 3. Google Maps Coordinates Extractor Regex
+function extractCoordsFromMapsUrl() {
+  const urlVal = document.getElementById('googleMapsUrl').value.trim();
+  const statusEl = document.getElementById('coordsVerifyStatus');
+  if (!urlVal) {
+    showToast('⚠️ กรุณากรอกลิ้งค์ Google Maps ก่อนกดดึงพิกัด', 'warning');
+    return;
+  }
+  
+  // Regex pattern matching:
+  // Normal link coordinates @13.7563,100.5018
+  // Query link coordinates !3d13.7563!4d100.5018
+  // Direct coordinates input e.g. 13.7563,100.5018
+  const regexNormal = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
+  const regexQuery = /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/;
+  const regexDirect = /^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/;
+
+  let match = urlVal.match(regexDirect);
+  if (!match) match = urlVal.match(regexNormal);
+  if (!match) match = urlVal.match(regexQuery);
+
+  if (match) {
+    const lat = parseFloat(match[1]);
+    const lng = parseFloat(match[2]);
+    document.getElementById('customerLat').value = lat;
+    document.getElementById('customerLng').value = lng;
+    if (statusEl) {
+      statusEl.innerHTML = `✅ ดึงพิกัดสำเร็จ: <strong>${lat.toFixed(5)}, ${lng.toFixed(5)}</strong>`;
+      statusEl.style.color = '#10b981';
+    }
+    showToast('📍 ดึงพิกัด GPS จากแผนที่สำเร็จแล้ว!', 'success');
+  } else {
+    if (statusEl) {
+      statusEl.innerHTML = `❌ ไม่พบข้อมูลพิกัดในลิ้งค์ (โปรดใช้รูปแบบลิ้งค์ที่มี @ละติจูด,ลองจิจูด)`;
+      statusEl.style.color = '#ef4444';
+    }
+    showToast('❌ ไม่สามารถดึงพิกัดจากลิงก์ที่กรอกได้', 'error');
+  }
+}
+
+// 4. Demo Toggle
+function toggleDemoOptions(e) {
+  if (e) e.preventDefault();
+  const section = document.getElementById('demoAccountsSection');
+  const widget = document.getElementById('roleSwitcherWidget');
+  const link = document.getElementById('toggleDemoLink');
+  if (!section) return;
+
+  if (section.style.display === 'none') {
+    section.style.display = 'block';
+    if (widget) widget.style.display = 'block';
+    if (link) link.textContent = '🔒 ซ่อนตัวเลือกบัญชีทดลอง (Hide Demo Options)';
+  } else {
+    section.style.display = 'none';
+    if (widget) widget.style.display = 'none';
+    if (link) link.textContent = '🔧 แสดงตัวเลือกบัญชีทดลอง (Demo Options)';
+  }
+}
+
+// 5. Update Sheets Warning Banner
+function updateSheetsWarningBanner() {
+  const banner = document.getElementById('sheetsWarningBanner');
+  if (!banner) return;
+  if (!sheetsApiUrl) {
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
 }

@@ -1319,4 +1319,64 @@ input[readonly] { opacity: 0.7; cursor: not-allowed; }
   letter-spacing: 0.5px;
 }
 
+/* ==========================================================================
+   TABS, WARNING BANNERS, AND SIGNATURE PADS STYLING
+   ========================================================================== */
+
+/* Form Tab Buttons */
+.form-tab-btn {
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: none;
+  background: transparent;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.form-tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.form-tab-btn.active {
+  color: var(--accent-blue) !important;
+  border-bottom-color: var(--accent-blue) !important;
+}
+
+/* Signature Pad Canvas styling */
+.signature-pad-wrap {
+  border-radius: var(--radius);
+  background: var(--bg-card2);
+}
+
+#signatureCanvas {
+  background: #ffffff !important;
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  border-radius: var(--radius-sm);
+  display: block;
+  touch-action: none;
+}
+
+/* Warning Banner Styles */
+.warning-banner {
+  animation: slideDownBanner 0.4s ease;
+}
+
+@keyframes slideDownBanner {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 

@@ -76,6 +76,15 @@
 
   <!-- Main Content -->
   <main class="main-content" id="mainContent">
+    <!-- Warning Banner for Google Sheets Connection -->
+    <div id="sheetsWarningBanner" class="warning-banner" style="display:none; background:rgba(251,191,36,0.1); border-bottom:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:10px 20px; font-size:0.82rem; align-items:center; gap:8px; justify-content:space-between; width:100%; box-sizing:border-box;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span>⚠️</span>
+        <span><strong>โหมดสาธิตออฟไลน์:</strong> ข้อมูลกำลังถูกจัดเก็บบนเครื่องคอมพิวเตอร์นี้เท่านั้น กรุณาเชื่อมต่อ Google Sheets เพื่อความปลอดภัยและบันทึกข้อมูลถาวร</span>
+      </div>
+      <button onclick="this.parentElement.style.display='none'" style="background:transparent; border:none; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:1.1rem; padding:0 5px;">✕</button>
+    </div>
+
     <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar-left">
@@ -253,189 +262,226 @@
         <form id="jobForm" onsubmit="saveJob(event)">
           <input type="hidden" id="editJobId" value="" />
 
-          <div class="form-section">
-            <h3 class="form-section-title">📌 ข้อมูลทั่วไป / General Information</h3>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>เลขที่งาน / Job No. <span class="required">*</span></label>
-                <input type="text" id="jobNo" placeholder="เช่น SV-2026-001" required />
-              </div>
-              <div class="form-group">
-                <label>วันที่รับงาน / Date <span class="required">*</span></label>
-                <input type="date" id="jobDate" required />
-              </div>
-              <div class="form-group">
-                <label>วันที่นัดหมาย / Appointment</label>
-                <input type="date" id="appointmentDate" />
-              </div>
-              <div class="form-group">
-                <label>วันที่เสร็จงาน / Completion Date</label>
-                <input type="date" id="completionDate" />
-              </div>
+          <!-- Form Tabs Navigation -->
+          <div class="form-tabs" style="display:flex; border-bottom:2px solid var(--border); margin-bottom:20px; gap:6px; overflow-x:auto; padding-bottom:6px;">
+            <button type="button" class="form-tab-btn active" id="formTabBtn0" onclick="switchJobFormTab(0)" style="background:transparent; border:none; color:var(--text-secondary); padding:8px 16px; font-size:0.88rem; font-weight:600; cursor:pointer; border-radius:var(--radius-sm); transition:all 0.2s;">📋 ข้อมูลลูกค้า & นัดหมาย</button>
+            <button type="button" class="form-tab-btn" id="formTabBtn1" onclick="switchJobFormTab(1)" style="background:transparent; border:none; color:var(--text-secondary); padding:8px 16px; font-size:0.88rem; font-weight:600; cursor:pointer; border-radius:var(--radius-sm); transition:all 0.2s;">🛠️ รายละเอียดงาน</button>
+            <button type="button" class="form-tab-btn" id="formTabBtn2" onclick="switchJobFormTab(2)" style="background:transparent; border:none; color:var(--text-secondary); padding:8px 16px; font-size:0.88rem; font-weight:600; cursor:pointer; border-radius:var(--radius-sm); transition:all 0.2s;">📸 รูปภาพหน้างาน</button>
+            <button type="button" class="form-tab-btn" id="formTabBtn3" onclick="switchJobFormTab(3)" style="background:transparent; border:none; color:var(--text-secondary); padding:8px 16px; font-size:0.88rem; font-weight:600; cursor:pointer; border-radius:var(--radius-sm); transition:all 0.2s;">✍️ ลายเซ็น & หมายเหตุ</button>
+          </div>
 
-              <!-- ── Check-in / Check-out ── -->
-              <div class="form-group checkinout-group">
-                <label>⏱️ เวลาเช็คอิน / Check-in Time</label>
-                <div class="time-input-wrap">
-                  <input type="datetime-local" id="checkInTime" oninput="calcDuration()" />
-                  <button type="button" class="btn-stamp" onclick="stampNow('checkInTime')" title="บันทึกเวลาปัจจุบัน">
-                    🕐 ตอนนี้
-                  </button>
+          <!-- TAB 0: ข้อมูลลูกค้า & นัดหมาย -->
+          <div class="form-tab-pane" id="jobFormTab0" style="display:block;">
+            <div class="form-section">
+              <h3 class="form-section-title">📌 ข้อมูลทั่วไป / General Information</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>เลขที่งาน / Job No. <span class="required">*</span></label>
+                  <input type="text" id="jobNo" placeholder="เช่น SV-2026-001" required />
+                </div>
+                <div class="form-group">
+                  <label>วันที่รับงาน / Date <span class="required">*</span></label>
+                  <input type="date" id="jobDate" required />
+                </div>
+                <div class="form-group">
+                  <label>วันที่นัดหมาย / Appointment</label>
+                  <input type="date" id="appointmentDate" />
+                </div>
+                <div class="form-group">
+                  <label>วันที่เสร็จงาน / Completion Date</label>
+                  <input type="date" id="completionDate" />
+                </div>
+
+                <!-- ── Check-in / Check-out ── -->
+                <div class="form-group checkinout-group">
+                  <label>⏱️ เวลาเช็คอิน / Check-in Time</label>
+                  <div class="time-input-wrap">
+                    <input type="datetime-local" id="checkInTime" oninput="calcDuration()" />
+                    <button type="button" class="btn-stamp" onclick="stampNow('checkInTime')" title="บันทึกเวลาปัจจุบัน">
+                      🕐 ตอนนี้
+                    </button>
+                  </div>
+                </div>
+                <div class="form-group checkinout-group">
+                  <label>⏱️ เวลาเช็คเอาท์ / Check-out Time</label>
+                  <div class="time-input-wrap">
+                    <input type="datetime-local" id="checkOutTime" oninput="calcDuration()" />
+                    <button type="button" class="btn-stamp" onclick="stampNow('checkOutTime')" title="บันทึกเวลาปัจจุบัน">
+                      🕐 ตอนนี้
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Duration display (full width) -->
+                <div class="form-group form-group-full">
+                  <div class="duration-bar" id="durationBar" style="display:none;">
+                    <span class="duration-icon">⌛</span>
+                    <span class="duration-label">ระยะเวลาทำงาน / Duration:</span>
+                    <span class="duration-value" id="durationValue">—</span>
+                  </div>
                 </div>
               </div>
-              <div class="form-group checkinout-group">
-                <label>⏱️ เวลาเช็คเอาท์ / Check-out Time</label>
-                <div class="time-input-wrap">
-                  <input type="datetime-local" id="checkOutTime" oninput="calcDuration()" />
-                  <button type="button" class="btn-stamp" onclick="stampNow('checkOutTime')" title="บันทึกเวลาปัจจุบัน">
-                    🕐 ตอนนี้
-                  </button>
-                </div>
-              </div>
+            </div>
 
-              <!-- Duration display (full width) -->
-              <div class="form-group form-group-full">
-                <div class="duration-bar" id="durationBar" style="display:none;">
-                  <span class="duration-icon">⌛</span>
-                  <span class="duration-label">ระยะเวลาทำงาน / Duration:</span>
-                  <span class="duration-value" id="durationValue">—</span>
+            <div class="form-section">
+              <h3 class="form-section-title">👤 ข้อมูลลูกค้า / Customer Information</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>ชื่อลูกค้า / Customer Name <span class="required">*</span></label>
+                  <input type="text" id="customerName" placeholder="ชื่อ-นามสกุล หรือบริษัท" required />
+                </div>
+                <div class="form-group">
+                  <label>เบอร์โทรศัพท์ / Phone <span class="required">*</span></label>
+                  <input type="tel" id="customerPhone" placeholder="08X-XXX-XXXX" required />
+                </div>
+                <div class="form-group form-group-full">
+                  <label>ที่อยู่ / Address</label>
+                  <textarea id="customerAddress" rows="2" placeholder="ที่อยู่ลูกค้า"></textarea>
+                </div>
+                <div class="form-group form-group-full">
+                  <label>📍 ลิ้งค์ Google Maps / Google Maps URL</label>
+                  <div style="display:flex; gap:8px; margin-top:6px;">
+                    <input type="text" id="googleMapsUrl" placeholder="วางลิ้งค์แผนที่ Google Maps (เช่น https://maps.app.goo.gl/...)" style="flex:1; margin-top:0;" />
+                    <button type="button" class="btn-outline" onclick="extractCoordsFromMapsUrl()" style="padding:0 12px; font-size:0.8rem; white-space:nowrap; display:flex; align-items:center; gap:6px;">📍 ดึงพิกัด GPS</button>
+                  </div>
+                  <input type="hidden" id="customerLat" />
+                  <input type="hidden" id="customerLng" />
+                  <div id="coordsVerifyStatus" style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;"></div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="form-section">
-            <h3 class="form-section-title">👤 ข้อมูลลูกค้า / Customer Information</h3>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>ชื่อลูกค้า / Customer Name <span class="required">*</span></label>
-                <input type="text" id="customerName" placeholder="ชื่อ-นามสกุล หรือบริษัท" required />
-              </div>
-              <div class="form-group">
-                <label>เบอร์โทรศัพท์ / Phone <span class="required">*</span></label>
-                <input type="tel" id="customerPhone" placeholder="08X-XXX-XXXX" required />
-              </div>
-              <div class="form-group form-group-full">
-                <label>ที่อยู่ / Address</label>
-                <textarea id="customerAddress" rows="2" placeholder="ที่อยู่ลูกค้า"></textarea>
-              </div>
-              <div class="form-group form-group-full">
-                <label>📍 ลิ้งค์ Google Maps / Google Maps URL</label>
-                <input type="text" id="googleMapsUrl" placeholder="วางลิ้งค์แผนที่ Google Maps (เช่น https://maps.app.goo.gl/...)" oninput="parseGoogleMapsUrl(this.value)" />
-                <input type="hidden" id="customerLat" />
-                <input type="hidden" id="customerLng" />
-              </div>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h3 class="form-section-title">🔧 รายละเอียดงาน / Job Details</h3>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>ประเภทงาน / Job Type <span class="required">*</span></label>
-                <select id="jobType" required>
-                  <option value="">-- เลือกประเภทงาน --</option>
-                  <option value="ซ่อม">ซ่อม (Repair)</option>
-                  <option value="ติดตั้ง">ติดตั้ง (Install)</option>
-                  <option value="PM">บำรุงรักษา PM (Maintenance)</option>
-                  <option value="ตรวจสอบ">ตรวจสอบ (Inspection)</option>
-                  <option value="ให้คำปรึกษา">ให้คำปรึกษา (Consulting)</option>
-                  <option value="อื่นๆ">อื่นๆ (Other)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>สถานะงาน / Status <span class="required">*</span></label>
-                <select id="jobStatus" required>
-                  <option value="pending">รอดำเนินการ (Pending)</option>
-                  <option value="in-progress">กำลังดำเนินการ (In Progress)</option>
-                  <option value="completed">เสร็จแล้ว (Completed)</option>
-                  <option value="cancelled">ยกเลิก (Cancelled)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>ช่างผู้รับผิดชอบ / Technician</label>
-                <input type="text" id="technician" placeholder="ชื่อช่าง" />
-              </div>
-              <div class="form-group">
-                <label>อุปกรณ์/เครื่องที่ซ่อม / Equipment</label>
-                <input type="text" id="equipment" placeholder="เช่น เครื่องปรับอากาศ, ปั๊มน้ำ" />
-              </div>
-              <div class="form-group form-group-full">
-                <label>รายละเอียดอาการ / Problem Description <span class="required">*</span></label>
-                <textarea id="problemDesc" rows="3" placeholder="อธิบายอาการเสีย/งานที่ต้องทำ" required></textarea>
-              </div>
-              <div class="form-group form-group-full">
-                <label>งานที่ดำเนินการ / Work Performed</label>
-                <textarea id="workPerformed" rows="3" placeholder="รายละเอียดงานที่ทำ"></textarea>
-              </div>
-              <div class="form-group form-group-full">
-                <label>สรุปการดำเนินงาน / Operation Summary</label>
-                <textarea id="operationSummary" rows="3" placeholder="สรุปภาพรวมการดำเนินงานหลังจากปฏิบัติหน้าที่เสร็จสิ้น"></textarea>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-section">
-            <h3 class="form-section-title">📸 รูปภาพปฏิบัติงาน / Service Photos (สูงสุด 6 รูป)</h3>
-            <div class="form-grid photo-uploader-grid">
-              <div class="form-group">
-                <label>รูปภาพที่ 1 / Photo 1 (ปัญหา / Before)</label>
-                <input type="file" id="photo1" accept="image/*" onchange="previewImage(this, 1)" style="margin-bottom:8px;" />
-                <div id="preview-1" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+          <!-- TAB 1: รายละเอียดงาน -->
+          <div class="form-tab-pane" id="jobFormTab1" style="display:none;">
+            <div class="form-section">
+              <h3 class="form-section-title">🔧 รายละเอียดงาน / Job Details</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>ประเภทงาน / Job Type <span class="required">*</span></label>
+                  <select id="jobType" required>
+                    <option value="">-- เลือกประเภทงาน --</option>
+                    <option value="ซ่อม">ซ่อม (Repair)</option>
+                    <option value="ติดตั้ง">ติดตั้ง (Install)</option>
+                    <option value="PM">บำรุงรักษา PM (Maintenance)</option>
+                    <option value="ตรวจสอบ">ตรวจสอบ (Inspection)</option>
+                    <option value="ให้คำปรึกษา">ให้คำปรึกษา (Consulting)</option>
+                    <option value="อื่นๆ">อื่นๆ (Other)</option>
+                  </select>
                 </div>
-              </div>
-              <div class="form-group">
-                <label>รูปภาพที่ 2 / Photo 2 (ระหว่างทำ / During)</label>
-                <input type="file" id="photo2" accept="image/*" onchange="previewImage(this, 2)" style="margin-bottom:8px;" />
-                <div id="preview-2" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                <div class="form-group">
+                  <label>สถานะงาน / Status <span class="required">*</span></label>
+                  <select id="jobStatus" required>
+                    <option value="pending">รอดำเนินการ (Pending)</option>
+                    <option value="in-progress">กำลังดำเนินการ (In Progress)</option>
+                    <option value="completed">เสร็จแล้ว (Completed)</option>
+                    <option value="cancelled">ยกเลิก (Cancelled)</option>
+                  </select>
                 </div>
-              </div>
-              <div class="form-group">
-                <label>รูปภาพที่ 3 / Photo 3 (หลังเสร็จ / After)</label>
-                <input type="file" id="photo3" accept="image/*" onchange="previewImage(this, 3)" style="margin-bottom:8px;" />
-                <div id="preview-3" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                <div class="form-group">
+                  <label>ช่างผู้รับผิดชอบ / Technician</label>
+                  <input type="text" id="technician" placeholder="ชื่อช่าง" />
                 </div>
-              </div>
-              <div class="form-group">
-                <label>รูปภาพที่ 4 / Photo 4 (เพิ่มเติม 1)</label>
-                <input type="file" id="photo4" accept="image/*" onchange="previewImage(this, 4)" style="margin-bottom:8px;" />
-                <div id="preview-4" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                <div class="form-group">
+                  <label>อุปกรณ์/เครื่องที่ซ่อม / Equipment</label>
+                  <input type="text" id="equipment" placeholder="เช่น เครื่องปรับอากาศ, ปั๊มน้ำ" />
                 </div>
-              </div>
-              <div class="form-group">
-                <label>รูปภาพที่ 5 / Photo 5 (เพิ่มเติม 2)</label>
-                <input type="file" id="photo5" accept="image/*" onchange="previewImage(this, 5)" style="margin-bottom:8px;" />
-                <div id="preview-5" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                <div class="form-group form-group-full">
+                  <label>รายละเอียดอาการ / Problem Description <span class="required">*</span></label>
+                  <textarea id="problemDesc" rows="3" placeholder="อธิบายอาการเสีย/งานที่ต้องทำ" required></textarea>
                 </div>
-              </div>
-              <div class="form-group">
-                <label>รูปภาพที่ 6 / Photo 6 (เพิ่มเติม 3)</label>
-                <input type="file" id="photo6" accept="image/*" onchange="previewImage(this, 6)" style="margin-bottom:8px;" />
-                <div id="preview-6" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
-                  <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                <div class="form-group form-group-full">
+                  <label>งานที่ดำเนินการ / Work Performed</label>
+                  <textarea id="workPerformed" rows="3" placeholder="รายละเอียดงานที่ทำ"></textarea>
+                </div>
+                <div class="form-group form-group-full">
+                  <label>สรุปการดำเนินงาน / Operation Summary</label>
+                  <textarea id="operationSummary" rows="3" placeholder="สรุปภาพรวมการดำเนินงานหลังจากปฏิบัติหน้าที่เสร็จสิ้น"></textarea>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="form-section">
-            <h3 class="form-section-title">📝 หมายเหตุ / Notes</h3>
-            <div class="form-grid">
-              <div class="form-group form-group-full">
-                <label>หมายเหตุ</label>
-                <textarea id="remarks" rows="2" placeholder="หมายเหตุเพิ่มเติม"></textarea>
+          <!-- TAB 2: รูปภาพหน้างาน -->
+          <div class="form-tab-pane" id="jobFormTab2" style="display:none;">
+            <div class="form-section">
+              <h3 class="form-section-title">📸 รูปภาพปฏิบัติงาน / Service Photos (สูงสุด 6 รูป)</h3>
+              <div class="form-grid photo-uploader-grid">
+                <div class="form-group">
+                  <label>รูปภาพที่ 1 / Photo 1 (ปัญหา / Before)</label>
+                  <input type="file" id="photo1" accept="image/*" onchange="previewImage(this, 1)" style="margin-bottom:8px;" />
+                  <div id="preview-1" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>รูปภาพที่ 2 / Photo 2 (ระหว่างทำ / During)</label>
+                  <input type="file" id="photo2" accept="image/*" onchange="previewImage(this, 2)" style="margin-bottom:8px;" />
+                  <div id="preview-2" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>รูปภาพที่ 3 / Photo 3 (หลังเสร็จ / After)</label>
+                  <input type="file" id="photo3" accept="image/*" onchange="previewImage(this, 3)" style="margin-bottom:8px;" />
+                  <div id="preview-3" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>รูปภาพที่ 4 / Photo 4 (เพิ่มเติม 1)</label>
+                  <input type="file" id="photo4" accept="image/*" onchange="previewImage(this, 4)" style="margin-bottom:8px;" />
+                  <div id="preview-4" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>รูปภาพที่ 5 / Photo 5 (เพิ่มเติม 2)</label>
+                  <input type="file" id="photo5" accept="image/*" onchange="previewImage(this, 5)" style="margin-bottom:8px;" />
+                  <div id="preview-5" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>รูปภาพที่ 6 / Photo 6 (เพิ่มเติม 3)</label>
+                  <input type="file" id="photo6" accept="image/*" onchange="previewImage(this, 6)" style="margin-bottom:8px;" />
+                  <div id="preview-6" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; height:160px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพ / No Image</span>
+                  </div>
+                </div>
               </div>
-              <div class="form-group">
-                <label>อยู่ในรับประกัน / Under Warranty?</label>
-                <select id="isWarranty">
-                  <option value="no">ไม่ใช่ (No)</option>
-                  <option value="yes">ใช่ (Yes - Under Warranty)</option>
-                </select>
+            </div>
+          </div>
+
+          <!-- TAB 3: ลายเซ็น & หมายเหตุ -->
+          <div class="form-tab-pane" id="jobFormTab3" style="display:none;">
+            <div class="form-section">
+              <h3 class="form-section-title">📝 หมายเหตุ & ลายเซ็นดิจิทัล / Notes & Signatures</h3>
+              <div class="form-grid">
+                <div class="form-group form-group-full">
+                  <label>หมายเหตุ</label>
+                  <textarea id="remarks" rows="2" placeholder="หมายเหตุเพิ่มเติม"></textarea>
+                </div>
+                <div class="form-group">
+                  <label>อยู่ในรับประกัน / Under Warranty?</label>
+                  <select id="isWarranty">
+                    <option value="no">ไม่ใช่ (No)</option>
+                    <option value="yes">ใช่ (Yes - Under Warranty)</option>
+                  </select>
+                </div>
+
+                <!-- Digital Signature Pad -->
+                <div class="form-group form-group-full">
+                  <label style="font-weight:600; color:var(--text-primary); margin-bottom:8px; display:block;">✍️ ลายเซ็นดิจิทัลผู้รับมอบงาน / Customer Signature Canvas</label>
+                  <div class="signature-pad-wrap" style="border:1px dashed var(--border); border-radius:var(--radius); background:var(--bg-card2); padding:12px; width:100%; max-width:400px; box-sizing:border-box;">
+                    <canvas id="signatureCanvas" width="376" height="150" style="background:#ffffff; border-radius:var(--radius-sm); border:1px solid var(--border); touch-action:none; width:100%; display:block; cursor:crosshair;"></canvas>
+                    <div style="margin-top:8px; display:flex; gap:8px; justify-content:space-between; align-items:center;">
+                      <button type="button" class="btn-outline" style="font-size:0.75rem; padding:6px 12px; border-radius:4px;" onclick="clearSignatureCanvas()">ล้างลายเซ็น</button>
+                      <span style="font-size:0.75rem; color:var(--text-secondary);">ใช้นิ้วหรือเมาส์เซ็นบนกรอบสี่เหลี่ยม</span>
+                    </div>
+                  </div>
+                  <input type="hidden" id="jobSignature" />
+                </div>
               </div>
             </div>
           </div>
@@ -609,8 +655,8 @@
                     <div class="sig-date">วันที่ ____________</div>
                   </div>
                   <div class="signature-box">
-                    <div class="sig-line"></div>
-                    <div>ผู้จัดการ / Manager</div>
+                    <div class="sig-line" id="rpt-sig-line-client" style="height:50px; display:flex; align-items:center; justify-content:center; border-bottom:1px solid #333; margin-bottom:8px;"></div>
+                    <div>ผู้จัดการ/ผู้รับมอบงาน (Manager / Client)</div>
                     <div class="sig-date">วันที่ ____________</div>
                   </div>
                 </div>
@@ -1037,27 +1083,35 @@
         </div>
         <button type="submit" class="btn-primary btn-full btn-lg" style="margin-top:12px;">🔓 เข้าสู่ระบบ</button>
       </form>
-      
-      <div class="login-divider" style="margin:20px 0; border-bottom:1px solid var(--border); position:relative; text-align:center;">
-        <span style="background:var(--bg-card); padding:0 10px; font-size:0.75rem; color:var(--text-secondary); position:relative; top:-9px;">หรือทดลองใช้งานระบบผ่าน Demo Accounts</span>
+      <div style="margin-top:12px; text-align:right;">
+        <a href="#" id="toggleDemoLink" onclick="toggleDemoOptions(event)" style="font-size:0.75rem; color:var(--text-secondary); text-decoration:underline;">🔧 แสดงตัวเลือกบัญชีทดลอง (Demo Options)</a>
       </div>
-      <div class="demo-buttons">
-        <button class="btn-outline btn-full" onclick="quickLogin('technician')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
-          <span>👤</span> ช่างเทคนิค (สมชาย แสงดี)
-        </button>
-        <button class="btn-outline btn-full" onclick="quickLogin('manager')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
-          <span>💼</span> ผู้จัดการ/หัวหน้า (วิชัย)
-        </button>
-        <button class="btn-outline btn-full" onclick="quickLogin('admin')" style="display:flex; align-items:center; justify-content:center; gap:8px;">
-          <span>👑</span> แอดมิน/บัญชี (Live Lighting)
-        </button>
+      
+      <div id="demoAccountsSection" style="display:none; transition:all 0.3s ease;">
+        <div class="login-divider" style="margin:20px 0; border-bottom:1px solid var(--border); position:relative; text-align:center;">
+          <span style="background:var(--bg-card); padding:0 10px; font-size:0.75rem; color:var(--text-secondary); position:relative; top:-9px;">หรือทดลองใช้งานระบบผ่าน Demo Accounts</span>
+        </div>
+        <div class="demo-buttons">
+          <button class="btn-outline btn-full" onclick="quickLogin('technician')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <span>👤</span> ช่างเทคนิค (สมชาย แสงดี)
+          </button>
+          <button class="btn-outline btn-full" onclick="quickLogin('manager')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <span>💼</span> ผู้จัดการ/หัวหน้า (วิชัย)
+          </button>
+          <button class="btn-outline btn-full" onclick="quickLogin('admin')" style="display:flex; align-items:center; justify-content:center; gap:8px;">
+            <span>👑</span> แอดมิน/บัญชี (Live Lighting)
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Floating Test Role Switcher -->
-  <div class="role-switcher-widget" id="roleSwitcherWidget">
-    <div class="widget-title">⚙️ สลับสิทธิ์ทดสอบ</div>
+  <div class="role-switcher-widget" id="roleSwitcherWidget" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:10px;">
+      <div class="widget-title">⚙️ สลับสิทธิ์ทดสอบ</div>
+      <button onclick="document.getElementById('roleSwitcherWidget').style.display='none'" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-weight:bold; font-size:0.85rem; padding:0 3px;">✕</button>
+    </div>
     <div class="widget-body" style="display:flex; gap:6px;">
       <button class="btn-period active" id="switch-role-technician" onclick="switchRole('technician')">ช่าง</button>
       <button class="btn-period" id="switch-role-manager" onclick="switchRole('manager')">ผจก.</button>
