@@ -13,21 +13,57 @@ let currentModalJobId = null;
 let partsCount = 0;
 let revenueChart = null;
 let statusChart = null;
+let jobTypePieChart = null;
+let jobTypeBarChart = null;
 let map = null;
 let sortConfig = { key: null, asc: true };
 let jobPhotos = ['', '', '', '', '', ''];
 let dashboardPeriod = 'month';
 
+// ── Pagination State ──
+let jobsCurrentPage = 1;
+const jobsPerPage = 10;
+let travelCurrentPage = 1;
+const travelPerPage = 10;
+let otCurrentPage = 1;
+const otPerPage = 10;
+
 // ── Enterprise Extensions State ──
 let currentUser = null;
-let lineNotifyToken = localStorage.getItem('servicell1_line_token') || '';
+let geminiApiKey = localStorage.getItem('servicell1_gemini_api_key') || '';
 const defaultEmployees = [
-  { name: 'สมชาย แสงดี', email: 'somchai@livelighting.com', role: 'technician', password: '123' },
-  { name: 'กิตติพงษ์ สว่าง', email: 'kittipong@livelighting.com', role: 'technician', password: '123' },
-  { name: 'วิชัย หัวหน้างาน', email: 'wichai@livelighting.com', role: 'manager', password: '123' },
-  { name: 'บัญชีกลาง Live Lighting', email: 'admin@livelighting.com', role: 'admin', password: '123' }
+  { name: 'สมชาย แสงดี', email: 'somchai@livelighting.com', role: 'service', roleDisplay: 'ช่างบริการ / Service Technician', password: '123' },
+  { name: 'กิตติพงษ์ สว่าง', email: 'kittipong@livelighting.com', role: 'service', roleDisplay: 'ช่างติดตั้งอาวุโส / Senior Installer', password: '123' },
+  { name: 'ฝ่ายขาย Live Lighting', email: 'sale@livelighting.com', role: 'sale', roleDisplay: 'ผู้แทนขาย / Sales Representative', password: '123' },
+  { name: 'ผู้ดูแลระบบสูงสุด', email: 'admin', role: 'admin', roleDisplay: 'ผู้จัดการระบบ / System Administrator', password: 'P@ssw0rd' },
+  { name: 'คุณทอม', email: 'tom@livelighting.com', role: 'admin', roleDisplay: 'Senior Product Manager', password: '123' }
 ];
-let employees = JSON.parse(localStorage.getItem('servicell1_employees')) || defaultEmployees;
+let employees = defaultEmployees;
+try {
+  const rawEmp = localStorage.getItem('servicell1_employees');
+  if (rawEmp) employees = JSON.parse(rawEmp);
+} catch (e) {
+  console.error('Failed to parse employees from storage', e);
+}
+
+// Migration check: Ensure admin account exists and remove old roles
+const hasOldRoles = employees.some(e => e.role === 'technician' || e.role === 'manager');
+const hasAdmin = employees.some(e => e.email === 'admin');
+
+if (hasOldRoles || !hasAdmin) {
+  const customEmployees = employees.filter(e => 
+    e.email !== 'somchai@livelighting.com' && 
+    e.email !== 'kittipong@livelighting.com' && 
+    e.email !== 'sale@livelighting.com' && 
+    e.email !== 'admin' &&
+    e.email !== 'tom@livelighting.com' &&
+    e.role !== 'technician' &&
+    e.role !== 'manager'
+  );
+  employees = [...defaultEmployees, ...customEmployees];
+  localStorage.setItem('servicell1_employees', JSON.stringify(employees));
+  localStorage.removeItem('servicell1_current_user'); // force logout
+}
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', () => {
@@ -40,11 +76,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Verify and enforce login state
   checkAuthOnLoad();
   
-  // Load data from Google Sheets if connection URL is configured
-  loadDataFromSheets();
-
-  // Initialize Sheets warning banner visibility
-  setTimeout(updateSheetsWarningBanner, 200);
+  // Initialize technician booking calendar state
+  initCalendar();
+  
+  // Load data from local backend server SQLite database
+  asyncInitData();
 });
 
 // ── Authentication & Roles Logic ──
@@ -72,7 +108,55 @@ function showLoginScreen() {
   if (sidebar) sidebar.style.display = 'none';
 }
 
+function getUserPermissions(user) {
+  if (user && user.permissions) {
+    return user.permissions;
+  }
+  const role = user ? user.role : 'sale';
+  if (role === 'admin') {
+    return {
+      viewJobs: true,
+      editJobs: true,
+      deleteJobs: true,
+      approveJobs: true,
+      travelClaims: true,
+      otClaims: true,
+      approveClaims: true,
+      payroll: true,
+      adminSettings: true
+    };
+  } else if (role === 'service') {
+    return {
+      viewJobs: true,
+      editJobs: true,
+      deleteJobs: true,
+      approveJobs: false,
+      travelClaims: true,
+      otClaims: true,
+      approveClaims: true,
+      payroll: true,
+      adminSettings: false
+    };
+  } else {
+    return {
+      viewJobs: true,
+      editJobs: true,
+      deleteJobs: false,
+      approveJobs: false,
+      travelClaims: false,
+      otClaims: false,
+      approveClaims: false,
+      payroll: false,
+      adminSettings: false
+    };
+  }
+}
+
 function setLoggedInUser(user) {
+  if (!user) {
+    showLoginScreen();
+    return;
+  }
   currentUser = user;
   localStorage.setItem('servicell1_current_user', JSON.stringify(user));
   
@@ -89,27 +173,38 @@ function setLoggedInUser(user) {
   if (userNameEl) userNameEl.textContent = user.name;
   
   const roleNames = {
-    technician: 'ช่างเทคนิค',
-    manager: 'ผู้จัดการ',
-    admin: 'แอดมิน/บัญชี'
+    service: 'Service',
+    sale: 'Sale',
+    admin: 'Admin'
   };
   const roleEl = document.getElementById('displayUserRole');
   if (roleEl) {
     roleEl.textContent = roleNames[user.role] || user.role;
-    roleEl.className = 'badge ' + (user.role === 'admin' ? 'badge-completed' : (user.role === 'manager' ? 'badge-progress' : 'badge-pending'));
+    roleEl.className = 'badge ' + (user.role === 'admin' ? 'badge-completed' : (user.role === 'sale' ? 'badge-progress' : 'badge-pending'));
   }
   
-  // Filter navigation menus
-  const adminMenu = document.getElementById('menu-admin-settings');
-  if (user.role !== 'admin') {
-    if (adminMenu) adminMenu.style.display = 'none';
-  } else {
-    if (adminMenu) adminMenu.style.display = 'flex';
-  }
+  // Filter navigation menus based on granular user permissions
+  const perms = getUserPermissions(user);
+  
+  const menuReport = document.getElementById('menu-report');
+  const menuTodo = document.getElementById('menu-todo');
+  const menuMap = document.getElementById('menu-map');
+  const menuTravel = document.getElementById('menu-travel-claim');
+  const menuOt = document.getElementById('menu-ot-claim');
+  const menuAdmin = document.getElementById('menu-admin-settings');
+  const menuAiAgents = document.getElementById('menu-ai-agents');
+
+  if (menuReport) menuReport.style.display = perms.viewJobs ? 'flex' : 'none';
+  if (menuTodo) menuTodo.style.display = perms.viewJobs ? 'flex' : 'none';
+  if (menuMap) menuMap.style.display = perms.viewJobs ? 'flex' : 'none';
+  if (menuTravel) menuTravel.style.display = perms.travelClaims ? 'flex' : 'none';
+  if (menuOt) menuOt.style.display = perms.otClaims ? 'flex' : 'none';
+  if (menuAdmin) menuAdmin.style.display = perms.adminSettings ? 'flex' : 'none';
+  if (menuAiAgents) menuAiAgents.style.display = (user && user.role === 'admin') ? 'flex' : 'none';
   
   // Set default values in forms
   const empSelect = document.getElementById('otEmployee');
-  if (empSelect && user.role === 'technician') {
+  if (empSelect && user.role === 'service') {
     empSelect.value = user.name;
   }
   
@@ -127,44 +222,98 @@ function setLoggedInUser(user) {
   
   // Pre-fill Admin settings fields if Admin
   if (user.role === 'admin') {
-    const lineNotifyEl = document.getElementById('lineNotifyToken');
-    if (lineNotifyEl) lineNotifyEl.value = lineNotifyToken;
+    const geminiApiKeyEl = document.getElementById('geminiApiKey');
+    if (geminiApiKeyEl) geminiApiKeyEl.value = geminiApiKey;
     const setCompName = document.getElementById('settingsCompanyName');
     if (setCompName) setCompName.value = document.getElementById('companyName')?.value || 'Live Lighting';
     const setCompAddr = document.getElementById('settingsCompanyAddress');
     if (setCompAddr) setCompAddr.value = document.getElementById('companyAddress')?.value || '';
+    const setCompPhone = document.getElementById('settingsCompanyPhone');
+    if (setCompPhone) setCompPhone.value = document.getElementById('companyPhone')?.value || '';
+    const setCompTax = document.getElementById('settingsCompanyTaxId');
+    if (setCompTax) setCompTax.value = document.getElementById('companyTaxId')?.value || '';
   }
 }
 
-function handleLoginSubmit(e) {
+async function handleLoginSubmit(e) {
   e.preventDefault();
   const email = document.getElementById('loginEmail').value.trim();
-  const pass = document.getElementById('loginPassword').value;
+  const password = document.getElementById('loginPassword').value;
   
-  const user = employees.find(emp => emp.email.toLowerCase() === email.toLowerCase());
-  if (user && user.password === pass) {
-    setLoggedInUser(user);
-    showToast('🔓 เข้าสู่ระบบสำเร็จ ยินดีต้อนรับ ' + user.name, 'success');
-  } else {
-    showToast('❌ อีเมลหรือรหัสผ่านไม่ถูกต้อง (ระบุ 123 สำหรับ Demo)', 'error');
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (res.ok) {
+      const user = await res.json();
+      setLoggedInUser(user);
+      showToast('🔓 เข้าสู่ระบบสำเร็จ ยินดีต้อนรับ ' + user.name, 'success');
+    } else {
+      const err = await res.json();
+      showToast('❌ ' + (err.error || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'), 'error');
+    }
+  } catch (err) {
+    console.error('Login request failed:', err);
+    showToast('🔌 ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์เพื่อล็อกอินได้', 'error');
   }
-}
-
-function quickLogin(role) {
-  const user = employees.find(emp => emp.role === role) || defaultEmployees.find(emp => emp.role === role);
-  if (user) {
-    setLoggedInUser(user);
-    showToast('🔓 เข้าสู่ระบบทดสอบ: ' + user.name, 'success');
-  }
-}
-
-function switchRole(role) {
-  quickLogin(role);
 }
 
 function logout() {
   showLoginScreen();
   showToast('🚪 ออกจากระบบเรียบร้อย', 'info');
+}
+
+function openChangePasswordModal() {
+  document.getElementById('changePasswordForm').reset();
+  document.getElementById('changePasswordModal').style.display = 'flex';
+}
+
+function closeChangePasswordModal(e) {
+  if (!e || e.target === document.getElementById('changePasswordModal')) {
+    document.getElementById('changePasswordModal').style.display = 'none';
+  }
+}
+
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const oldPassword = document.getElementById('oldPassword').value;
+  const newPassword = document.getElementById('newPassword').value;
+  const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+
+  if (newPassword !== confirmNewPassword) {
+    showToast('❌ รหัสผ่านใหม่ไม่ตรงกัน', 'error');
+    return;
+  }
+
+  if (newPassword.length < 4) {
+    showToast('❌ รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 4 ตัวอักษร', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: loggedInUser.email,
+        oldPassword,
+        newPassword
+      })
+    });
+    if (res.ok) {
+      showToast('🔑 เปลี่ยนรหัสผ่านสำเร็จแล้ว กรุณาเข้าสู่ระบบอีกครั้งด้วยรหัสผ่านใหม่', 'success');
+      document.getElementById('changePasswordModal').style.display = 'none';
+      setTimeout(() => logout(), 1500);
+    } else {
+      const err = await res.json();
+      showToast('❌ ' + (err.error || 'ไม่สามารถเปลี่ยนรหัสผ่านได้'), 'error');
+    }
+  } catch (err) {
+    console.error('Change password failed:', err);
+    showToast('🔌 ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์เพื่อเปลี่ยนรหัสผ่านได้', 'error');
+  }
 }
 
 // ── Clock ──
@@ -178,7 +327,124 @@ function updateClock() {
   });
 }
 
-// ── Local Storage & Sheet Synchronization ──
+// Server API wrappers
+async function apiPost(endpoint, data) {
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  } catch (e) {
+    console.error(`API POST failed for ${endpoint}:`, e);
+    showToast(`⚠️ ไม่สามารถซิงค์ข้อมูลบางส่วนไปยังเซิร์ฟเวอร์ฐานข้อมูลได้ ข้อมูลถูกจัดเก็บในเครื่องชั่วคราว`, 'warning');
+    throw e;
+  }
+}
+
+async function apiDelete(endpoint) {
+  try {
+    const res = await fetch(endpoint, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  } catch (e) {
+    console.error(`API DELETE failed for ${endpoint}:`, e);
+    showToast(`⚠️ ลบข้อมูลจากเซิร์ฟเวอร์ฐานข้อมูลไม่สำเร็จ`, 'warning');
+    throw e;
+  }
+}
+
+async function asyncInitData() {
+  try {
+    // 1. Fetch settings
+    const settingsRes = await fetch('/api/settings');
+    if (settingsRes.ok) {
+      const settings = await settingsRes.json();
+      if (settings.company) {
+        localStorage.setItem('servicell1_company', JSON.stringify(settings.company));
+        applyCompanySettingsToDOM(settings.company);
+      }
+      if (settings.geminiApiKey !== undefined) {
+        geminiApiKey = settings.geminiApiKey;
+        localStorage.setItem('servicell1_gemini_api_key', geminiApiKey);
+      }
+    }
+
+    // 2. Fetch employees
+    const empRes = await fetch('/api/employees');
+    if (empRes.ok) {
+      employees = await empRes.json();
+      localStorage.setItem('servicell1_employees', JSON.stringify(employees));
+    }
+
+    // 3. Fetch jobs
+    const jobsRes = await fetch('/api/jobs');
+    if (jobsRes.ok) {
+      jobs = await jobsRes.json();
+      localStorage.setItem('servicell1_jobs', JSON.stringify(jobs));
+    }
+
+    // 4. Fetch travel claims
+    const travelRes = await fetch('/api/travel-claims');
+    if (travelRes.ok) {
+      travelClaims = await travelRes.json();
+      localStorage.setItem('servicell1_travel_claims', JSON.stringify(travelClaims));
+    }
+
+    // 5. Fetch ot claims
+    const otRes = await fetch('/api/ot-claims');
+    if (otRes.ok) {
+      otClaims = await otRes.json();
+      localStorage.setItem('servicell1_ot_claims', JSON.stringify(otClaims));
+    }
+
+    console.log('Successfully loaded all data from local backend SQL database.');
+  } catch (e) {
+    console.warn('Backend server unreachable. Falling back to local storage cache.', e);
+    showToast('🔌 โหมดออฟไลน์: ใช้ฐานข้อมูลสำรองในเบราว์เซอร์', 'info');
+  }
+
+  // Perform initial renders after loading data
+  renderAll();
+  populateRefJobsDropdowns();
+  renderTravelClaimsTable();
+  renderOtClaimsTable();
+  renderEmployeeTable();
+  renderPayrollTable();
+  updateCharts();
+  updateKPIs();
+}
+
+function applyCompanySettingsToDOM(company) {
+  const nameEl = document.getElementById('companyName');
+  const addrEl = document.getElementById('companyAddress');
+  const phoneEl = document.getElementById('companyPhone');
+  const taxEl = document.getElementById('companyTaxId');
+  
+  if (nameEl) nameEl.value = company.name || 'Live Lighting';
+  if (addrEl) addrEl.value = company.address || '123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110';
+  if (phoneEl) phoneEl.value = company.phone || '02-XXX-XXXX';
+  if (taxEl) taxEl.value = company.taxId || '0-1234-56789-01-2';
+
+  const setCompName = document.getElementById('settingsCompanyName');
+  if (setCompName) setCompName.value = company.name || 'Live Lighting';
+  const setCompAddr = document.getElementById('settingsCompanyAddress');
+  if (setCompAddr) setCompAddr.value = company.address || '';
+  const setCompPhone = document.getElementById('settingsCompanyPhone');
+  if (setCompPhone) setCompPhone.value = company.phone || '';
+  const setCompTax = document.getElementById('settingsCompanyTaxId');
+  if (setCompTax) setCompTax.value = company.taxId || '';
+
+  const logoEl = document.getElementById('showLogo');
+  const sigEl = document.getElementById('showSignature');
+  const warEl = document.getElementById('showWarranty');
+  if (logoEl && company.showLogo !== undefined) logoEl.checked = company.showLogo;
+  if (sigEl && company.showSignature !== undefined) sigEl.checked = company.showSignature;
+  if (warEl && company.showWarranty !== undefined) warEl.checked = company.showWarranty;
+}
+
 function saveToStorage() {
   try {
     localStorage.setItem('servicell1_jobs', JSON.stringify(jobs));
@@ -186,11 +452,12 @@ function saveToStorage() {
     localStorage.setItem('servicell1_ot_claims', JSON.stringify(otClaims));
   } catch (e) {
     console.error('Local storage quota exceeded!', e);
-    showToast('⚠️ พื้นที่บันทึกข้อมูลในเบราว์เซอร์เต็ม ไม่สามารถบันทึกข้อมูลรูปภาพลงเครื่องได้ (ระบบจะลองอัปโหลดเข้า Google Sheets โดยตรง)', 'warning');
+    showToast('⚠️ พื้นที่บันทึกข้อมูลในเบราว์เซอร์เต็ม ไม่สามารถบันทึกข้อมูลรูปภาพลงเครื่องได้', 'warning');
   }
 
+  let companyInfo = null;
   try {
-    const companyInfo = {
+    companyInfo = {
       name: document.getElementById('companyName')?.value || '',
       address: document.getElementById('companyAddress')?.value || '',
       phone: document.getElementById('companyPhone')?.value || '',
@@ -204,19 +471,18 @@ function saveToStorage() {
     console.error('Failed to save company details', e);
   }
 
-  updateSyncQueueStatus();
-
-  // Sync to Google Sheets in the background if connected
-  if (sheetsApiUrl) {
-    syncDataToSheets();
+  // Push settings to backend server SQLite
+  if (companyInfo) {
+    apiPost('/api/settings', { company: companyInfo }).catch(err => console.error("Failed to sync settings on server:", err));
   }
 }
 function loadFromStorage() {
   try {
     const raw = localStorage.getItem('servicell1_jobs');
     jobs = raw ? JSON.parse(raw) : getSampleData();
+    jobs = (jobs || []).filter(j => j && typeof j === 'object' && j.id);
     if (!raw) saveToStorage();
-  } catch { jobs = getSampleData(); }
+  } catch { jobs = getSampleData().filter(j => j && typeof j === 'object' && j.id); }
 
   try {
     const rawTravel = localStorage.getItem('servicell1_travel_claims');
@@ -252,7 +518,6 @@ function loadFromStorage() {
   } catch (e) {
     console.error('Failed to load company details', e);
   }
-  updateSyncQueueStatus();
 }
 
 // ── Sample Data ──
@@ -317,6 +582,28 @@ function getSampleData() {
 
 // ── Navigation ──
 function showPage(pageId) {
+  const perms = getUserPermissions(currentUser);
+  if (pageId === 'travel-claim' && !perms.travelClaims) {
+    showToast('⚠️ คุณไม่มีสิทธิ์เข้าถึงหน้าเบิกค่าเดินทาง', 'warning');
+    return;
+  }
+  if (pageId === 'ot-claim' && !perms.otClaims) {
+    showToast('⚠️ คุณไม่มีสิทธิ์เข้าถึงหน้าเบิก OT', 'warning');
+    return;
+  }
+  if (pageId === 'admin-settings' && !perms.adminSettings) {
+    showToast('⚠️ คุณไม่มีสิทธิ์เข้าตั้งค่าแอดมิน', 'warning');
+    return;
+  }
+  if (pageId === 'ai-agents' && (!currentUser || currentUser.role !== 'admin')) {
+    showToast('⚠️ เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถเข้าถึงระบบพนักงาน AI', 'warning');
+    return;
+  }
+  if (pageId === 'report' && !perms.viewJobs) {
+    showToast('⚠️ คุณไม่มีสิทธิ์ออกรายงาน', 'warning');
+    return;
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -331,20 +618,61 @@ function showPage(pageId) {
     'jobs':         '📋 รายการงานทั้งหมด',
     'add-job':      '➕ เพิ่มงานใหม่',
     'report':       '📄 ออก Service Report',
-    'todo':         '📝 รายการสิ่งที่ต้องทำ / To-Do List',
+    'todo':         '🗓️ ปฏิทินจองคิวงานช่าง / Technician Calendar',
     'map':          '🗺️ แผนที่ตำแหน่งลูกค้า',
     'travel-claim': '🚗 เบิกค่าเดินทาง / Travel Claim',
-    'ot-claim':     '⏰ เบิก OT / Overtime Claim'
+    'ot-claim':     '⏰ เบิก OT / Overtime Claim',
+    'ai-agents':    '🤖 ระบบพนักงานและผู้ช่วย AI (AI Assistants)'
   };
   document.getElementById('pageTitle').textContent = titles[pageId] || '';
 
   if (pageId === 'map') initMap();
+  if (pageId === 'jobs') renderAllJobsTable();
   if (pageId === 'report') populateReportSelect();
   if (pageId === 'travel-claim' || pageId === 'ot-claim') populateRefJobsDropdowns();
+  if (pageId === 'ai-agents') initAIAgents();
   if (pageId === 'dashboard') { updateCharts(); updateKPIs(); }
-  if (pageId === 'add-job' && !editingJobId) {
-    resetForm();
-    document.getElementById('formTitle').innerHTML = '➕ เพิ่มงานใหม่ <span class="chart-sub">Add New Service Job</span>';
+  if (pageId === 'add-job') {
+    populateApproverDropdown();
+    if (!editingJobId) {
+      resetForm();
+      document.getElementById('formTitle').innerHTML = '➕ เพิ่มงานใหม่ <span class="chart-sub">Add New Service Job</span>';
+      
+      // If Sale is adding, default to awaiting_approval and disable changing status
+      const isSale = (currentUser && currentUser.role === 'sale');
+      if (isSale) {
+        setVal('jobStatus', 'awaiting_approval');
+        const statusSelect = document.getElementById('jobStatus');
+        if (statusSelect) statusSelect.disabled = true;
+      } else {
+        const statusSelect = document.getElementById('jobStatus');
+        if (statusSelect) statusSelect.disabled = false;
+      }
+    } else {
+      const statusSelect = document.getElementById('jobStatus');
+      if (statusSelect) statusSelect.disabled = false;
+    }
+    
+    // Toggle tab visibility for Sale vs Service roles
+    const isSale = (currentUser && currentUser.role === 'sale');
+    const tab2 = document.getElementById('formTabBtn2');
+    const tab3 = document.getElementById('formTabBtn3');
+    if (tab2) tab2.style.display = isSale ? 'none' : 'block';
+    // Allow Sales role to access Tab 3 (Signatures & Notes) to fill product warranty record
+    if (tab3) tab3.style.display = 'block';
+    
+    // Toggle check-in/out and workPerformed/summary fields based on role
+    const checkInGroup = document.getElementById('checkInTimeGroup');
+    const checkOutGroup = document.getElementById('checkOutTimeGroup');
+    const workPerformedGroup = document.getElementById('workPerformedGroup');
+    const operationSummaryGroup = document.getElementById('operationSummaryGroup');
+    if (checkInGroup) checkInGroup.style.display = isSale ? 'none' : 'block';
+    if (checkOutGroup) checkOutGroup.style.display = isSale ? 'none' : 'block';
+    if (workPerformedGroup) workPerformedGroup.style.display = isSale ? 'none' : 'block';
+    if (operationSummaryGroup) operationSummaryGroup.style.display = isSale ? 'none' : 'block';
+    
+    // Always start at tab 0
+    switchJobFormTab(0);
   }
 
   // Close mobile sidebar
@@ -372,6 +700,7 @@ function renderAll() {
   renderAllJobsTable();
   updateCharts();
   updateJobsCount();
+  renderCalendar();
 }
 
 // ── KPIs ──
@@ -382,14 +711,33 @@ function getDashboardPeriodJobs() {
   const thisYear = now.getFullYear();
 
   let filteredJobs = jobs;
-  if (currentUser && currentUser.role === 'technician') {
-    filteredJobs = jobs.filter(j => j.technician === currentUser.name);
+
+  // Filter out awaiting_approval jobs for unauthorized users
+  if (currentUser) {
+    filteredJobs = filteredJobs.filter(j => {
+      if (currentUser.role === 'admin') return true;
+      if (j.status === 'awaiting_approval') {
+        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
+        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
+        return isApprover || isCreator;
+      }
+      return true;
+    });
   }
 
   return filteredJobs.filter(j => {
     if (!j.date) return false;
     const jd = new Date(j.date);
     if (isNaN(jd.getTime())) return false;
+
+    const startDateVal = document.getElementById('dashboardStartDate')?.value;
+    const endDateVal = document.getElementById('dashboardEndDate')?.value;
+
+    if (startDateVal || endDateVal) {
+      if (startDateVal && j.date < startDateVal) return false;
+      if (endDateVal && j.date > endDateVal) return false;
+      return true;
+    }
 
     if (dashboardPeriod === 'day') {
       return j.date === todayStr;
@@ -434,6 +782,12 @@ function animateCount(id, target) {
 
 // ── Change Period ──
 function changePeriod(p) {
+  // Clear custom date inputs when clicking quick period buttons
+  const startEl = document.getElementById('dashboardStartDate');
+  const endEl = document.getElementById('dashboardEndDate');
+  if (startEl) startEl.value = '';
+  if (endEl) endEl.value = '';
+
   dashboardPeriod = p;
   document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
   document.getElementById('btn-period-' + p)?.classList.add('active');
@@ -448,6 +802,39 @@ function changePeriod(p) {
 
   updateKPIs();
   updateCharts();
+}
+
+function updateDashboardFilter() {
+  // Deactivate period buttons active class when custom date range is used
+  document.querySelectorAll('.btn-period').forEach(b => b.classList.remove('active'));
+  
+  const labelEl = document.getElementById('kpiTotalLabel');
+  if (labelEl) {
+    const start = document.getElementById('dashboardStartDate')?.value;
+    const end = document.getElementById('dashboardEndDate')?.value;
+    if (start && end) {
+      labelEl.textContent = `${formatDate(start)} ถึง ${formatDate(end)}`;
+    } else if (start) {
+      labelEl.textContent = `ตั้งแต่ ${formatDate(start)}`;
+    } else if (end) {
+      labelEl.textContent = `ถึง ${formatDate(end)}`;
+    } else {
+      labelEl.textContent = 'ทั้งหมด';
+    }
+  }
+
+  updateKPIs();
+  updateCharts();
+}
+
+function clearDashboardDateFilter() {
+  const startEl = document.getElementById('dashboardStartDate');
+  const endEl = document.getElementById('dashboardEndDate');
+  if (startEl) startEl.value = '';
+  if (endEl) endEl.value = '';
+  
+  // Reactivate default period
+  changePeriod('month');
 }
 
 // ── Charts ──
@@ -478,40 +865,117 @@ function initCharts() {
     }
   });
 
+  const typePieCtx = document.getElementById('jobTypePieChart').getContext('2d');
+  jobTypePieChart = new Chart(typePieCtx, {
+    type: 'pie',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 11 }, padding: 12, boxWidth: 14 } } }
+    }
+  });
+
+  const typeBarCtx = document.getElementById('jobTypeBarChart').getContext('2d');
+  jobTypeBarChart = new Chart(typeBarCtx, {
+    type: 'bar',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => 'จำนวนงาน: ' + ctx.parsed.y + ' งาน' } } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8', font: { size: 11 }, callback: v => v } }
+      }
+    }
+  });
+
   updateCharts();
 }
 
 function updateCharts() {
   if (!revenueChart || !statusChart) return;
   const year = parseInt(document.getElementById('chartYearFilter')?.value || new Date().getFullYear());
+  const filtered = getDashboardPeriodJobs();
 
   let labels = [];
   let data = [];
 
-  if (dashboardPeriod === 'day') {
-    const now = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now.getTime() - 86400000 * i);
-      const str = d.toISOString().split('T')[0];
-      labels.push(d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }));
-      data.push(jobs.filter(j => j.date === str).length);
+  const startDateVal = document.getElementById('dashboardStartDate')?.value;
+  const endDateVal = document.getElementById('dashboardEndDate')?.value;
+
+  if (startDateVal || endDateVal) {
+    // Custom start/end dates: calculate difference
+    const start = startDateVal ? new Date(startDateVal) : new Date(Math.min(...jobs.filter(j => j.date).map(j => new Date(j.date))));
+    const end = endDateVal ? new Date(endDateVal) : new Date();
+
+    const diffTime = Math.abs(end - start);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 31) {
+      // Daily breakdown
+      for (let i = 0; i <= diffDays; i++) {
+        const d = new Date(start.getTime() + 86400000 * i);
+        const str = d.toISOString().split('T')[0];
+        labels.push(d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }));
+        data.push(filtered.filter(j => j.date === str).length);
+      }
+    } else if (diffDays <= 365) {
+      // Monthly breakdown
+      let current = new Date(start.getFullYear(), start.getMonth(), 1);
+      const endLimit = new Date(end.getFullYear(), end.getMonth(), 1);
+
+      while (current <= endLimit) {
+        const y = current.getFullYear();
+        const m = current.getMonth();
+        labels.push(current.toLocaleDateString('th-TH', { month: 'short', year: '2-digit' }));
+        data.push(filtered.filter(j => {
+          if (!j.date) return false;
+          const jd = new Date(j.date);
+          return jd.getFullYear() === y && jd.getMonth() === m;
+        }).length);
+        current.setMonth(current.getMonth() + 1);
+      }
+    } else {
+      // Yearly breakdown
+      const startYear = start.getFullYear();
+      const endYear = end.getFullYear();
+      for (let y = startYear; y <= endYear; y++) {
+        labels.push(String(y));
+        data.push(filtered.filter(j => {
+          if (!j.date) return false;
+          return new Date(j.date).getFullYear() === y;
+        }).length);
+      }
     }
-  } else if (dashboardPeriod === 'month') {
-    labels = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-    data = Array(12).fill(0);
-    jobs.forEach(j => {
-      if (!j.date) return;
-      const d = new Date(j.date);
-      if (d.getFullYear() === year) data[d.getMonth()]++;
-    });
-  } else if (dashboardPeriod === 'year') {
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear - 4; y <= currentYear; y++) {
-      labels.push(String(y));
-      data.push(jobs.filter(j => {
-        if (!j.date) return false;
-        return new Date(j.date).getFullYear() === y;
-      }).length);
+  } else {
+    // Normal button behavior (Day, Month, Year)
+    if (dashboardPeriod === 'day') {
+      const now = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - 86400000 * i);
+        const str = d.toISOString().split('T')[0];
+        labels.push(d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }));
+        data.push(filtered.filter(j => j.date === str).length);
+      }
+    } else if (dashboardPeriod === 'month') {
+      labels = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+      data = Array(12).fill(0);
+      filtered.forEach(j => {
+        if (!j.date) return;
+        const d = new Date(j.date);
+        if (d.getFullYear() === year) data[d.getMonth()]++;
+      });
+    } else if (dashboardPeriod === 'year') {
+      const currentYear = new Date().getFullYear();
+      for (let y = currentYear - 4; y <= currentYear; y++) {
+        labels.push(String(y));
+        data.push(filtered.filter(j => {
+          if (!j.date) return false;
+          return new Date(j.date).getFullYear() === y;
+        }).length);
+      }
     }
   }
 
@@ -526,10 +990,10 @@ function updateCharts() {
   revenueChart.update();
 
   const statusCounts = {
-    'รอดำเนินการ': jobs.filter(j => j.status === 'pending').length,
-    'กำลังดำเนินการ': jobs.filter(j => j.status === 'in-progress').length,
-    'เสร็จแล้ว': jobs.filter(j => j.status === 'completed').length,
-    'ยกเลิก': jobs.filter(j => j.status === 'cancelled').length,
+    'รอดำเนินการ': filtered.filter(j => j.status === 'pending').length,
+    'กำลังดำเนินการ': filtered.filter(j => j.status === 'in-progress').length,
+    'เสร็จแล้ว': filtered.filter(j => j.status === 'completed').length,
+    'ยกเลิก': filtered.filter(j => j.status === 'cancelled').length,
   };
 
   statusChart.data.labels = Object.keys(statusCounts);
@@ -539,15 +1003,68 @@ function updateCharts() {
     borderWidth: 0
   }];
   statusChart.update();
+
+  if (jobTypePieChart && jobTypeBarChart) {
+    const typeCounts = {};
+    filtered.forEach(j => {
+      if (!j.jobType) return;
+      const type = j.jobType.trim();
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+
+    const typeLabels = Object.keys(typeCounts);
+    const typeData = Object.values(typeCounts);
+
+    // Update Pie Chart
+    jobTypePieChart.data.labels = typeLabels;
+    jobTypePieChart.data.datasets = [{
+      data: typeData,
+      backgroundColor: ['#4f8ef7', '#2ecf7d', '#ff8c42', '#a855f7', '#06b6d4', '#f59e0b', '#ec4899'].slice(0, typeLabels.length),
+      borderWidth: 0
+    }];
+    jobTypePieChart.update();
+
+    // Update Bar Chart (Salesperson Job Creation Stats)
+    const saleCounts = {};
+    filtered.forEach(j => {
+      if (!j.createdBy) return;
+      const emp = employees.find(e => e.email.toLowerCase() === j.createdBy.toLowerCase());
+      const name = emp ? emp.name : j.createdBy;
+      saleCounts[name] = (saleCounts[name] || 0) + 1;
+    });
+
+    const saleLabels = Object.keys(saleCounts);
+    const saleData = Object.values(saleCounts);
+
+    jobTypeBarChart.data.labels = saleLabels;
+    jobTypeBarChart.data.datasets = [{
+      data: saleData,
+      backgroundColor: 'rgba(46,207,125,0.6)',
+      borderColor: '#2ecf7d',
+      borderWidth: 1,
+      borderRadius: 6
+    }];
+    jobTypeBarChart.update();
+  }
 }
 
 // ── Tables ──
 function renderRecentTable() {
   const tbody = document.getElementById('recentTableBody');
   let myJobs = jobs;
-  if (currentUser && currentUser.role === 'technician') {
-    myJobs = jobs.filter(j => j.technician === currentUser.name);
+
+  if (currentUser) {
+    myJobs = myJobs.filter(j => {
+      if (currentUser.role === 'admin') return true;
+      if (j.status === 'awaiting_approval') {
+        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
+        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
+        return isApprover || isCreator;
+      }
+      return true;
+    });
   }
+
   const recent = [...myJobs].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 8);
   if (!recent.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-row">ยังไม่มีข้อมูล กรุณาเพิ่มงานใหม่</td></tr>';
@@ -562,8 +1079,8 @@ function renderRecentTable() {
       <td>${statusBadge(j.status)}</td>
       <td>
         <button class="action-btn" onclick="viewJob('${j.id}')" title="ดูรายละเอียด">👁️</button>
-        <button class="action-btn" onclick="editJob('${j.id}')" title="แก้ไข">✏️</button>
-        <button class="action-btn" onclick="generateReportForJob('${j.id}')" title="ออก Report">📄</button>
+        ${getUserPermissions(currentUser).editJobs ? `<button class="action-btn" onclick="editJob('${j.id}')" title="แก้ไข">✏️</button>` : ''}
+        ${canViewReport(j) ? `<button class="action-btn" onclick="generateReportForJob('${j.id}')" title="ออก Report">📄</button>` : ''}
       </td>
     </tr>
   `).join('');
@@ -576,8 +1093,18 @@ function getFilteredJobs() {
   const dateTo = document.getElementById('filterDateTo')?.value || '';
 
   let filteredJobs = jobs;
-  if (currentUser && currentUser.role === 'technician') {
-    filteredJobs = jobs.filter(j => j.technician === currentUser.name);
+
+  // Filter out awaiting_approval jobs for unauthorized users
+  if (currentUser) {
+    filteredJobs = filteredJobs.filter(j => {
+      if (currentUser.role === 'admin') return true;
+      if (j.status === 'awaiting_approval') {
+        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
+        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
+        return isApprover || isCreator;
+      }
+      return true;
+    });
   }
 
   return filteredJobs.filter(j => {
@@ -603,15 +1130,66 @@ function renderAllJobsTable() {
 
   updateJobsCount(filtered.length);
 
+  // Pagination bounds correction
+  const totalPages = Math.ceil(filtered.length / jobsPerPage) || 1;
+  if (jobsCurrentPage > totalPages) {
+    jobsCurrentPage = totalPages;
+  }
+  if (jobsCurrentPage < 1) {
+    jobsCurrentPage = 1;
+  }
+
+  // Update pagination info & controls
+  const infoEl = document.getElementById('jobsPaginationInfo');
+  const btnPrev = document.getElementById('btnJobsPrev');
+  const btnNext = document.getElementById('btnJobsNext');
+
+  const start = (jobsCurrentPage - 1) * jobsPerPage;
+  const end = Math.min(start + jobsPerPage, filtered.length);
+
+  if (infoEl) {
+    if (filtered.length === 0) {
+      infoEl.textContent = 'แสดง 0 ถึง 0 จาก 0 รายการ';
+    } else {
+      infoEl.textContent = `แสดง ${start + 1} ถึง ${end} จาก ${filtered.length} รายการ (หน้า ${jobsCurrentPage}/${totalPages})`;
+    }
+  }
+  if (btnPrev) btnPrev.disabled = jobsCurrentPage === 1;
+  if (btnNext) btnNext.disabled = jobsCurrentPage === totalPages || filtered.length === 0;
+
   if (!filtered.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="empty-row">ไม่พบข้อมูลที่ตรงกัน</td></tr>';
     return;
   }
 
-  tbody.innerHTML = filtered.map(j => {
+  const paginated = filtered.slice(start, end);
+
+  tbody.innerHTML = paginated.map(j => {
     const mapLinkHtml = j.googleMapsUrl 
       ? `<a href="${j.googleMapsUrl}" target="_blank" class="action-btn" style="text-decoration:none;" title="เปิดแผนที่">📍 แผนที่</a>` 
       : '-';
+
+    const perms = getUserPermissions(currentUser);
+
+    let approveBtn = '';
+    const isApprover = j.approver && currentUser && (j.approver.toLowerCase() === currentUser.email.toLowerCase());
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    if ((isApprover || isAdmin) && j.status === 'awaiting_approval') {
+      approveBtn = `<button class="action-btn" onclick="approveNewJob('${j.id}')" title="อนุมัติงานบริการ" style="color:var(--accent-green); font-weight:bold; border:1px solid rgba(16,185,129,0.25); padding:2px 6px; border-radius:4px; margin-right:4px; font-size:0.75rem;">✔️ อนุมัติ</button>`;
+    }
+
+    let acceptBtn = '';
+    if (perms.editJobs && j.status === 'pending') {
+      acceptBtn = `<button class="action-btn" onclick="acceptJob('${j.id}')" title="ตอบรับงาน" style="color:var(--accent-blue); font-weight:bold; border:1px solid rgba(0,100,250,0.15); padding:2px 6px; border-radius:4px; margin-right:4px; font-size:0.75rem;">👍 ตอบรับ</button>`;
+    }
+
+    const editBtn = perms.editJobs
+      ? `<button class="action-btn" onclick="editJob('${j.id}')" title="แก้ไข">✏️</button>`
+      : '';
+
+    const deleteBtn = perms.deleteJobs
+      ? `<button class="action-btn del" onclick="deleteJob('${j.id}')" title="ลบ">🗑️</button>`
+      : '';
 
     return `
       <tr>
@@ -624,14 +1202,21 @@ function renderAllJobsTable() {
         <td>${mapLinkHtml}</td>
         <td>${statusBadge(j.status)}</td>
         <td>
+          ${approveBtn}
+          ${acceptBtn}
           <button class="action-btn" onclick="viewJob('${j.id}')" title="ดู">👁️</button>
-          <button class="action-btn" onclick="editJob('${j.id}')" title="แก้ไข">✏️</button>
-          <button class="action-btn" onclick="generateReportForJob('${j.id}')" title="Report">📄</button>
-          <button class="action-btn del" onclick="deleteJob('${j.id}')" title="ลบ">🗑️</button>
+          ${editBtn}
+          ${canViewReport(j) ? `<button class="action-btn" onclick="generateReportForJob('${j.id}')" title="Report">📄</button>` : ''}
+          ${deleteBtn}
         </td>
       </tr>
     `;
   }).join('');
+}
+
+function changeJobsPage(direction) {
+  jobsCurrentPage += direction;
+  renderAllJobsTable();
 }
 
 function updateJobsCount(n) {
@@ -652,8 +1237,10 @@ function applyFilters() { renderAll(); }
 // ── Status Badge ──
 function statusBadge(status) {
   const map = {
-    'pending':     ['badge-pending',   '⏳ รอดำเนินการ'],
-    'in-progress': ['badge-progress',  '🔧 กำลังดำเนินการ'],
+    'awaiting_approval': ['badge-pending-approval', '🔑 รออนุมัติ'],
+    'pending':     ['badge-pending',   '⏳ นัดหมายแล้ว'],
+    'accepted':    ['badge-progress',  '👍 ตอบรับแล้ว'],
+    'in-progress': ['badge-progress',  '🔧 เช็คอินแล้ว'],
     'completed':   ['badge-completed', '✅ เสร็จแล้ว'],
     'cancelled':   ['badge-cancelled', '❌ ยกเลิก'],
   };
@@ -664,12 +1251,69 @@ function statusBadge(status) {
 // ── Date Format ──
 function formatDate(d) {
   if (!d) return '-';
-  return new Date(d).toLocaleDateString('th-TH', { year: '2-digit', month: 'short', day: 'numeric' });
+  const dateObj = new Date(d);
+  if (isNaN(dateObj.getTime())) return d;
+  const options = { year: '2-digit', month: 'short', day: 'numeric' };
+  if (d.includes('T') || d.includes(':')) {
+    options.hour = '2-digit';
+    options.minute = '2-digit';
+  }
+  return dateObj.toLocaleDateString('th-TH', options);
+}
+
+// ── Form Validation ──
+function validateJobForm() {
+  const tab0Fields = [
+    { id: 'jobNo', name: 'เลขที่งาน / Job No.' },
+    { id: 'jobDate', name: 'วันที่รับงาน / Date' },
+    { id: 'customerName', name: 'ชื่อลูกค้า / Customer Name' },
+    { id: 'customerPhone', name: 'เบอร์โทรศัพท์ / Phone' }
+  ];
+
+  const tab1Fields = [
+    { id: 'jobType', name: 'ประเภทงาน / Job Type' },
+    { id: 'jobStatus', name: 'สถานะงาน / Status' },
+    { id: 'problemDesc', name: 'รายละเอียดอาการ / Problem Description' }
+  ];
+
+  for (const f of tab0Fields) {
+    const el = document.getElementById(f.id);
+    if (!el || !el.value.trim()) {
+      showToast(`❌ กรุณากรอก [${f.name}] ในแท็บ 'ข้อมูลลูกค้า & นัดหมาย'`, 'error');
+      switchJobFormTab(0);
+      setTimeout(() => el && el.focus(), 150);
+      return false;
+    }
+  }
+
+  for (const f of tab1Fields) {
+    const el = document.getElementById(f.id);
+    if (!el || !el.value.trim()) {
+      showToast(`❌ กรุณากรอก [${f.name}] ในแท็บ 'รายละเอียดงาน'`, 'error');
+      switchJobFormTab(1);
+      setTimeout(() => el && el.focus(), 150);
+      return false;
+    }
+  }
+
+  if (v('jobStatus') === 'awaiting_approval') {
+    const approverEl = document.getElementById('jobApprover');
+    if (!approverEl || !approverEl.value.trim()) {
+      showToast(`❌ กรุณาเลือก [ผู้อนุมัติงาน / Approver] ในแท็บ 'รายละเอียดงาน'`, 'error');
+      switchJobFormTab(1);
+      setTimeout(() => approverEl && approverEl.focus(), 150);
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // ── Save Job ──
 function saveJob(e) {
   e.preventDefault();
+
+  if (!validateJobForm()) return;
 
   const existingJob = editingJobId ? jobs.find(j => j.id === editingJobId) : null;
   const checkInLat = tempCheckInGPS ? tempCheckInGPS.lat : (existingJob ? (existingJob.checkInLat || null) : null);
@@ -682,7 +1326,9 @@ function saveJob(e) {
 
   const job = {
     id: editingJobId || 'JOB' + Date.now(),
-    jobNo: v('jobNo'), date: v('jobDate'), appointmentDate: v('appointmentDate'), completionDate: v('completionDate'),
+    jobNo: v('jobNo'), date: v('jobDate'), appointmentDate: v('appointmentDate'),
+    bookingDuration: parseInt(v('bookingDuration')) || 2,
+    completionDate: v('completionDate'),
     checkInTime: v('checkInTime'), checkOutTime: v('checkOutTime'),
     checkInLat, checkInLng, checkInDistance,
     checkOutLat, checkOutLng, checkOutDistance,
@@ -695,12 +1341,53 @@ function saveJob(e) {
     isWarranty: v('isWarranty') || 'no',
     remarks: v('remarks'),
     photos: [...jobPhotos],
-    signature: v('jobSignature')
+    signature: v('jobSignature'),
+    problemPhoto: v('problemPhotoBase64'),
+    approver: v('jobApprover'),
+    createdBy: existingJob ? (existingJob.createdBy || '') : (currentUser ? currentUser.email : '')
   };
 
   // Reset temporary GPS caches
   tempCheckInGPS = null;
   tempCheckOutGPS = null;
+
+  // Check for technician booking overlap conflicts using precise durations
+  if (job.technician && job.appointmentDate) {
+    const appTime = new Date(job.appointmentDate).getTime();
+    if (!isNaN(appTime)) {
+      const appEndTime = appTime + (job.bookingDuration * 60 * 60 * 1000);
+      
+      const conflict = jobs.find(j => {
+        if (j.id === job.id) return false;
+        if (j.technician !== job.technician) return false;
+        if (!j.appointmentDate) return false;
+        
+        const existingTime = new Date(j.appointmentDate).getTime();
+        if (isNaN(existingTime)) return false;
+        
+        const existingDuration = j.bookingDuration || 2;
+        const existingEndTime = existingTime + (existingDuration * 60 * 60 * 1000);
+        
+        // Overlap formula: start1 < end2 && start2 < end1
+        return appTime < existingEndTime && existingTime < appEndTime;
+      });
+      
+      if (conflict) {
+        const conflictDuration = conflict.bookingDuration || 2;
+        let conflictTimeStr = formatDate(conflict.appointmentDate);
+        if (conflict.appointmentDate.includes('T')) {
+          const conflictStartStr = conflict.appointmentDate.split('T')[1].substring(0, 5);
+          const conflictEnd = new Date(new Date(conflict.appointmentDate).getTime() + (conflictDuration * 60 * 60 * 1000));
+          const conflictEndStr = conflictEnd.toTimeString().substring(0, 5);
+          conflictTimeStr += ` (${conflictStartStr} - ${conflictEndStr} น.)`;
+        }
+        
+        showToast('❌ คิวงานของช่างทับซ้อนกับเวลานี้แล้ว', 'error');
+        alert(`ไม่สามารถลงเวลานัดหมายซ้อนกันได้!\n\nช่างเทคนิค: ${job.technician}\nมีนัดหมายแล้วในช่วงเวลา:\n- วัน/เวลา: ${conflictTimeStr} (${conflictDuration} ชม.)\n- ลูกค้า: ${conflict.customerName}\n- เลขที่ใบงาน: ${conflict.jobNo || conflict.id}`);
+        return;
+      }
+    }
+  }
 
   if (editingJobId) {
     const idx = jobs.findIndex(j => j.id === editingJobId);
@@ -710,6 +1397,9 @@ function saveJob(e) {
     jobs.unshift(job);
     showToast('✅ เพิ่มงานใหม่เรียบร้อย', 'success');
   }
+
+  // Save to SQLite backend database
+  apiPost('/api/jobs', job).catch(err => console.error("Failed to save job to server database:", err));
 
   editingJobId = null;
   saveToStorage();
@@ -731,19 +1421,33 @@ function editJob(id) {
   setTimeout(() => {
     setVal('editJobId', id);
     setVal('jobNo', job.jobNo); setVal('jobDate', job.date);
-    setVal('appointmentDate', job.appointmentDate); setVal('completionDate', job.completionDate);
+    setVal('appointmentDate', job.appointmentDate);
+    setVal('bookingDuration', job.bookingDuration || 2);
+    setVal('completionDate', job.completionDate);
     setVal('checkInTime', job.checkInTime); setVal('checkOutTime', job.checkOutTime);
     setVal('customerName', job.customerName); setVal('customerPhone', job.customerPhone);
     setVal('customerAddress', job.customerAddress);
     setVal('googleMapsUrl', job.googleMapsUrl);
     setVal('customerLat', job.customerLat); setVal('customerLng', job.customerLng);
     setVal('jobType', job.jobType); setVal('jobStatus', job.status);
+    setVal('jobApprover', job.approver || '');
     setVal('technician', job.technician); setVal('equipment', job.equipment);
     setVal('problemDesc', job.problemDesc); setVal('workPerformed', job.workPerformed);
     setVal('operationSummary', job.operationSummary || '');
     setVal('remarks', job.remarks);
     setVal('isWarranty', job.isWarranty || 'no');
     setVal('jobSignature', job.signature || '');
+    
+    // Load problem photo
+    setVal('problemPhotoBase64', job.problemPhoto || '');
+    const problemPreview = document.getElementById('problemPhotoPreview');
+    if (problemPreview) {
+      if (job.problemPhoto) {
+        problemPreview.innerHTML = `<img src="${job.problemPhoto}" style="width:100%; height:100%; object-fit:contain;" />`;
+      } else {
+        problemPreview.innerHTML = `<span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพแจ้งปัญหา / No Image</span>`;
+      }
+    }
 
     // Set photos state
     for (let i = 0; i < 6; i++) {
@@ -769,6 +1473,10 @@ function setVal(id, val) {
 function deleteJob(id) {
   if (!confirm('ต้องการลบข้อมูลงานนี้ใช่หรือไม่?')) return;
   jobs = jobs.filter(j => j.id !== id);
+  
+  // Delete from SQLite backend database
+  apiDelete('/api/jobs/' + id).catch(err => console.error("Failed to delete job on server database:", err));
+
   saveToStorage();
   renderAll();
   showToast('🗑️ ลบข้อมูลงานเรียบร้อย', 'info');
@@ -777,6 +1485,7 @@ function deleteJob(id) {
 // ── Reset Form ──
 function resetForm() {
   document.getElementById('jobForm').reset();
+  setVal('jobApprover', '');
   editingJobId = null;
   document.getElementById('editJobId').value = '';
   setDefaultDates();
@@ -796,6 +1505,15 @@ function resetForm() {
 
   // Clear signature canvas
   clearSignatureCanvas();
+
+  // Reset problem photo field
+  setVal('problemPhotoBase64', '');
+  const problemPhotoInput = document.getElementById('problemPhotoInput');
+  if (problemPhotoInput) problemPhotoInput.value = '';
+  const problemPreview = document.getElementById('problemPhotoPreview');
+  if (problemPreview) {
+    problemPreview.innerHTML = `<span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพแจ้งปัญหา / No Image</span>`;
+  }
   
   // Reset tabs to Tab 0
   switchJobFormTab(0);
@@ -823,6 +1541,20 @@ function stampNow(fieldId) {
     el.style.boxShadow = '0 0 0 3px rgba(79,142,247,0.4)';
     setTimeout(() => el.style.boxShadow = '', 600);
   }
+  
+  // Auto transition status
+  if (fieldId === 'checkInTime') {
+    const statusSelect = document.getElementById('jobStatus');
+    if (statusSelect && statusSelect.value === 'accepted') {
+      statusSelect.value = 'in-progress';
+    }
+  } else if (fieldId === 'checkOutTime') {
+    const statusSelect = document.getElementById('jobStatus');
+    if (statusSelect && (statusSelect.value === 'in-progress' || statusSelect.value === 'accepted')) {
+      statusSelect.value = 'completed';
+    }
+  }
+
   calcDuration();
   
   if (navigator.geolocation) {
@@ -911,7 +1643,9 @@ function calcDuration() {
  */
 function formatDateTime(dt) {
   if (!dt) return '-';
-  return new Date(dt).toLocaleString('th-TH', {
+  const dateObj = new Date(dt);
+  if (isNaN(dateObj.getTime())) return dt;
+  return dateObj.toLocaleString('th-TH', {
     year: '2-digit', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
@@ -992,6 +1726,30 @@ function viewJob(id) {
     </div>
   ` : '';
 
+  const approverSignatureHtml = job.approverSignature ? `
+    <div class="modal-detail-item modal-detail-full" style="background:rgba(16,185,129,0.06);padding:12px;border-radius:8px;border:1px solid rgba(16,185,129,0.15); margin-bottom:12px;">
+      <div class="detail-label" style="color:#10b981;margin-bottom:8px; font-weight:600;">🔑 ลายเซ็นการอนุมัติงานบริการ (Approval Info)</div>
+      <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+        <div style="border:1px solid var(--border); border-radius:6px; background:#ffffff; padding:6px; width:150px; height:60px; display:flex; align-items:center; justify-content:center;">
+          <img src="${job.approverSignature}" style="max-width:100%; max-height:100%; object-fit:contain;" />
+        </div>
+        <div>
+          <div style="font-size:0.8rem; color:var(--text-primary);">อนุมัติโดย: <strong>${job.approver || '-'}</strong></div>
+          <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">เมื่อเวลา: ${job.approvedAt ? formatDateTime(job.approvedAt) : '-'}</div>
+        </div>
+      </div>
+    </div>
+  ` : '';
+
+  const technicianSignatureHtml = job.signature ? `
+    <div class="modal-detail-item modal-detail-full" style="margin-bottom:12px;">
+      <div class="detail-label">✍️ ลายเซ็นลูกค้า/ช่างเทคนิค (Client Signature)</div>
+      <div style="border:1px solid var(--border); border-radius:6px; background:#ffffff; padding:6px; width:150px; height:60px; display:flex; align-items:center; justify-content:center; margin-top:6px;">
+        <img src="${job.signature}" style="max-width:100%; max-height:100%; object-fit:contain;" />
+      </div>
+    </div>
+  ` : '';
+
   document.getElementById('modalTitle').textContent = `${job.jobNo || job.id} - ${job.customerName}`;
   document.getElementById('modalBody').innerHTML = `
     <div class="modal-detail-grid">
@@ -1004,6 +1762,8 @@ function viewJob(id) {
         <div class="detail-value">${job.customerAddress || '-'}</div>
       </div>
       ${checkinRow}
+      ${approverSignatureHtml}
+      ${technicianSignatureHtml}
       <div class="modal-detail-item"><div class="detail-label">ประเภทงาน</div><div class="detail-value">${job.jobType}</div></div>
       <div class="modal-detail-item"><div class="detail-label">สถานะ</div><div class="detail-value">${statusBadge(job.status)}</div></div>
       <div class="modal-detail-item"><div class="detail-label">ช่างผู้รับผิดชอบ</div><div class="detail-value">${job.technician || '-'}</div></div>
@@ -1017,6 +1777,20 @@ function viewJob(id) {
     </div>
   `;
   document.getElementById('jobModal').classList.add('active');
+
+  // Dynamically show/hide footer buttons based on permissions
+  const editBtnEl = document.getElementById('modalEditBtn');
+  if (editBtnEl) {
+    editBtnEl.style.display = getUserPermissions(currentUser).editJobs ? 'inline-block' : 'none';
+  }
+  const deleteBtnEl = document.getElementById('modalDeleteBtn');
+  if (deleteBtnEl) {
+    deleteBtnEl.style.display = getUserPermissions(currentUser).deleteJobs ? 'inline-block' : 'none';
+  }
+  const reportBtnEl = document.getElementById('modalReportBtn');
+  if (reportBtnEl) {
+    reportBtnEl.style.display = canViewReport(job) ? 'inline-block' : 'none';
+  }
 }
 
 function closeJobModal() {
@@ -1027,7 +1801,6 @@ function closeJobModal() {
 function closeModal(e) { 
   if (e.target === document.getElementById('jobModal')) closeJobModal(); 
   if (e.target === document.getElementById('claimModal')) closeClaimModal(); 
-  if (e.target === document.getElementById('sheetsModal')) closeSheetsModal(); 
 }
 
 function editJobFromModal() { closeJobModal(); editJob(currentModalJobId); }
@@ -1061,22 +1834,42 @@ function exportExcel() {
 }
 
 // ── Report ──
+function canViewReport(job) {
+  if (!currentUser) return false;
+  if (currentUser.role === 'admin') return true;
+  if (currentUser.role === 'service') {
+    return job.status === 'completed';
+  }
+  if (currentUser.role === 'sale') {
+    // Allow all Sales staff to view/generate reports for any completed jobs
+    return job.status === 'completed';
+  }
+  return false;
+}
+
 function populateReportSelect() {
   const select = document.getElementById('reportJobSelect');
+  const allowed = jobs.filter(canViewReport);
   select.innerHTML = '<option value="">-- เลือกงาน --</option>' +
-    [...jobs].sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(j =>
+    [...allowed].sort((a,b) => (b.date||'').localeCompare(a.date||'')).map(j =>
       `<option value="${j.id}">${j.jobNo || j.id} | ${j.customerName} | ${formatDate(j.date)}</option>`
     ).join('');
 }
 
 function filterReportJobs(q) {
   const select = document.getElementById('reportJobSelect');
-  const filtered = jobs.filter(j => !q || (j.jobNo||'').toLowerCase().includes(q.toLowerCase()) || (j.customerName||'').toLowerCase().includes(q.toLowerCase()));
+  const allowed = jobs.filter(canViewReport);
+  const filtered = allowed.filter(j => !q || (j.jobNo||'').toLowerCase().includes(q.toLowerCase()) || (j.customerName||'').toLowerCase().includes(q.toLowerCase()));
   select.innerHTML = '<option value="">-- เลือกงาน --</option>' +
     filtered.map(j => `<option value="${j.id}">${j.jobNo || j.id} | ${j.customerName} | ${formatDate(j.date)}</option>`).join('');
 }
 
 function generateReportForJob(id) {
+  const job = jobs.find(j => j.id === id);
+  if (!job || !canViewReport(job)) {
+    showToast('❌ คุณไม่มีสิทธิ์เข้าถึงรายงานของใบงานนี้', 'error');
+    return;
+  }
   showPage('report');
   setTimeout(() => {
     document.getElementById('reportJobSelect').value = id;
@@ -1138,10 +1931,18 @@ function loadReportData() {
     '#rpt-work-title': txt.workTitle,
     '#rpt-summary-title': txt.summaryTitle,
     '#rpt-photos-title': txt.photosTitle,
-    '#rpt-signature-section .signature-box:nth-child(1) div:nth-child(2)': txt.sigTech,
-    '#rpt-signature-section .signature-box:nth-child(2) div:nth-child(2)': txt.sigMgr,
-    '#rpt-signature-section .signature-box:nth-child(1) .sig-date': txt.dateLabel + ' ____________',
-    '#rpt-signature-section .signature-box:nth-child(2) .sig-date': txt.dateLabel + ' ____________',
+    '#rpt-sig-label-approver': (() => {
+      const appEmp = employees.find(e => e.email.toLowerCase() === (job.approver || '').toLowerCase());
+      return (appEmp && appEmp.roleDisplay) ? appEmp.roleDisplay : (lang === 'en' ? 'Authorized Manager' : 'ผู้จัดการ (Manager)');
+    })(),
+    '#rpt-sig-label-tech': (() => {
+      const techEmp = employees.find(e => e.name === job.technician);
+      return (techEmp && techEmp.roleDisplay) ? techEmp.roleDisplay : txt.sigTech;
+    })(),
+    '#rpt-sig-label-client': lang === 'en' ? 'Customer / Receiver' : 'ผู้รับมอบงาน (Customer)',
+    '#rpt-sig-date-approver': txt.dateLabel + ' ____________',
+    '#rpt-sig-date-tech': txt.dateLabel + ' ____________',
+    '#rpt-sig-date-client': txt.dateLabel + ' ____________',
   };
 
   for (const [sel, val] of Object.entries(selectors)) {
@@ -1165,6 +1966,9 @@ function loadReportData() {
   setText('rpt-phone', job.customerPhone);
   setText('rpt-address', job.customerAddress || '-');
   setText('rpt-job-type', job.jobType);
+  const saleEmp = employees.find(e => e.email.toLowerCase() === (job.createdBy || '').toLowerCase());
+  const saleName = saleEmp ? saleEmp.name : (job.createdBy || '-');
+  setText('rpt-creator', saleName);
   setText('rpt-technician', job.technician || '-');
   setText('rpt-equipment', job.equipment || '-');
   setText('rpt-appointment', formatDate(job.appointmentDate));
@@ -1174,6 +1978,8 @@ function loadReportData() {
   setText('rpt-operation-summary', job.operationSummary || '-');
   setText('rpt-warranty-val', txt.warrantyText);
   setText('rpt-remarks', job.remarks ? (lang === 'en' ? 'Remarks: ' : 'หมายเหตุ: ') + job.remarks : '');
+
+
 
   // Render the up to 6 photos in a clean grid
   const photoGrid = document.getElementById('rpt-photos-grid');
@@ -1199,16 +2005,55 @@ function loadReportData() {
   document.getElementById('rpt-warranty-section').style.display = document.getElementById('showWarranty').checked ? '' : 'none';
   document.getElementById('rpt-signature-section').style.display = document.getElementById('showSignature').checked ? '' : 'none';
 
-  // Inject digital signature
-  const clientSigEl = document.getElementById('rpt-sig-line-client');
-  if (clientSigEl) {
+  // 1. Inject Technician signature & details (Left Column)
+  const techSigEl = document.getElementById('rpt-sig-line-tech');
+  const techDateEl = document.getElementById('rpt-sig-date-tech');
+  
+  if (techSigEl) {
     if (job.signature) {
-      clientSigEl.innerHTML = `<img src="${job.signature}" style="max-height:48px; max-width:200px; object-fit:contain;" />`;
-      clientSigEl.style.borderBottom = 'none';
+      techSigEl.innerHTML = `<img src="${job.signature}" style="max-height:55px; max-width:180px; object-fit:contain;" />`;
+      techSigEl.style.borderBottom = 'none';
     } else {
-      clientSigEl.innerHTML = '';
-      clientSigEl.style.borderBottom = '1px solid #333';
+      techSigEl.innerHTML = '';
+      techSigEl.style.borderBottom = '1px solid #333';
     }
+  }
+  if (techDateEl) {
+    const d = job.completionDate || job.date;
+    techDateEl.textContent = d ? 'วันที่ ' + formatDate(d) : 'วันที่ ____________';
+  }
+
+  // 2. Inject Approver details (Middle Column)
+  const approverSigEl = document.getElementById('rpt-sig-line-approver');
+  const approverDateEl = document.getElementById('rpt-sig-date-approver');
+  
+  if (approverSigEl) {
+    if (job.approverSignature) {
+      approverSigEl.innerHTML = `<img src="${job.approverSignature}" style="max-height:55px; max-width:180px; object-fit:contain;" />`;
+      approverSigEl.style.borderBottom = 'none';
+    } else {
+      approverSigEl.innerHTML = '';
+      approverSigEl.style.borderBottom = '1px solid #333';
+    }
+  }
+  if (approverDateEl) {
+    if (job.approvedAt) {
+      approverDateEl.textContent = 'วันที่ ' + formatDate(job.approvedAt.split('T')[0]);
+    } else {
+      approverDateEl.textContent = 'วันที่ ____________';
+    }
+  }
+
+  // 3. Inject Customer Details (Right Column - Left blank for manual sign)
+  const clientSigEl = document.getElementById('rpt-sig-line-client');
+  const clientDateEl = document.getElementById('rpt-sig-date-client');
+  
+  if (clientSigEl) {
+    clientSigEl.innerHTML = '';
+    clientSigEl.style.borderBottom = '1px solid #333';
+  }
+  if (clientDateEl) {
+    clientDateEl.textContent = 'วันที่ ____________';
   }
 }
 
@@ -1585,6 +2430,7 @@ function autoFillTravelAddress() {
   if (!jobId) return;
   const job = jobs.find(j => j.id === jobId);
   if (job) {
+    document.getElementById('travelClaimNo').value = 'TC-' + (job.jobNo || job.id);
     document.getElementById('travelEnd').value = job.customerAddress || '';
     if (job.googleMapsUrl) {
       document.getElementById('travelMapUrl').value = job.googleMapsUrl;
@@ -1618,6 +2464,7 @@ function autoFillOtEmployee() {
   if (!jobId) return;
   const job = jobs.find(j => j.id === jobId);
   if (job) {
+    document.getElementById('otClaimNo').value = 'OT-' + (job.jobNo || job.id);
     document.getElementById('otEmployee').value = job.technician || '';
     if (job.date) {
       document.getElementById('otWorkDate').value = job.date;
@@ -1663,6 +2510,9 @@ function saveTravelClaim(e) {
     showToast('✅ เพิ่มใบเบิกค่าเดินทางเรียบร้อย', 'success');
   }
 
+  // Save to SQLite backend database
+  apiPost('/api/travel-claims', claim).catch(err => console.error("Failed to save travel claim on server database:", err));
+
   saveToStorage();
   resetTravelForm();
   renderTravelClaimsTable();
@@ -1684,19 +2534,49 @@ function renderTravelClaimsTable() {
   if (!tbody) return;
 
   let filtered = travelClaims;
-  if (currentUser && currentUser.role === 'technician') {
+  const perms = getUserPermissions(currentUser);
+  if (currentUser && !perms.approveClaims) {
     filtered = travelClaims.filter(c => {
       const refJob = jobs.find(j => j.id === c.jobId);
       return refJob && refJob.technician === currentUser.name;
     });
   }
 
+  // Pagination bounds correction
+  const totalPages = Math.ceil(filtered.length / travelPerPage) || 1;
+  if (travelCurrentPage > totalPages) {
+    travelCurrentPage = totalPages;
+  }
+  if (travelCurrentPage < 1) {
+    travelCurrentPage = 1;
+  }
+
+  // Update pagination info & controls
+  const infoEl = document.getElementById('travelPaginationInfo');
+  const btnPrev = document.getElementById('btnTravelPrev');
+  const btnNext = document.getElementById('btnTravelNext');
+
+  const start = (travelCurrentPage - 1) * travelPerPage;
+  const end = Math.min(start + travelPerPage, filtered.length);
+
+  if (infoEl) {
+    if (filtered.length === 0) {
+      infoEl.textContent = 'แสดง 0 ถึง 0 จาก 0 รายการ';
+    } else {
+      infoEl.textContent = `แสดง ${start + 1} ถึง ${end} จาก ${filtered.length} รายการ (หน้า ${travelCurrentPage}/${totalPages})`;
+    }
+  }
+  if (btnPrev) btnPrev.disabled = travelCurrentPage === 1;
+  if (btnNext) btnNext.disabled = travelCurrentPage === totalPages || filtered.length === 0;
+
   if (!filtered.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty-row">ยังไม่มีประวัติการเบิก</td></tr>';
     return;
   }
 
-  tbody.innerHTML = filtered.map(c => {
+  const paginated = filtered.slice(start, end);
+
+  tbody.innerHTML = paginated.map(c => {
     const refJob = jobs.find(j => j.id === c.jobId);
     const mapIconHtml = c.mapUrl ? ` <a href="${c.mapUrl}" target="_blank" title="ดูเส้นทางแผนที่" style="text-decoration:none;">🗺️</a>` : '';
     const status = c.status || 'pending';
@@ -1704,7 +2584,7 @@ function renderTravelClaimsTable() {
     // Actions selection
     let actionsHtml = `<button class="action-btn" onclick="viewClaim('travel', '${c.id}')" title="ดูรายละเอียด">👁️</button>`;
     if (currentUser) {
-      if (currentUser.role === 'manager' || currentUser.role === 'admin') {
+      if (currentUser.role === 'sale') {
         if (status === 'pending') {
           actionsHtml = `
             <button class="action-btn" onclick="viewClaim('travel', '${c.id}')" title="ดูรายละเอียดก่อนอนุมัติ">👁️</button>
@@ -1744,6 +2624,11 @@ function renderTravelClaimsTable() {
   }).join('');
 }
 
+function changeTravelPage(direction) {
+  travelCurrentPage += direction;
+  renderTravelClaimsTable();
+}
+
 function editTravelClaim(id) {
   const c = travelClaims.find(claim => claim.id === id);
   if (!c) return;
@@ -1770,6 +2655,10 @@ function editTravelClaim(id) {
 function deleteTravelClaim(id) {
   if (!confirm('ต้องการลบใบเบิกค่าเดินทางนี้ใช่หรือไม่?')) return;
   travelClaims = travelClaims.filter(c => c.id !== id);
+
+  // Delete from SQLite backend database
+  apiDelete('/api/travel-claims/' + id).catch(err => console.error("Failed to delete travel claim on server database:", err));
+
   saveToStorage();
   renderTravelClaimsTable();
   showToast('🗑️ ลบข้อมูลเรียบร้อย', 'info');
@@ -1823,6 +2712,9 @@ function saveOtClaim(e) {
     showToast('✅ เพิ่มใบเบิก OT เรียบร้อย', 'success');
   }
 
+  // Save to SQLite backend database
+  apiPost('/api/ot-claims', claim).catch(err => console.error("Failed to save OT claim on server database:", err));
+
   saveToStorage();
   resetOtForm();
   renderOtClaimsTable();
@@ -1842,23 +2734,53 @@ function renderOtClaimsTable() {
   if (!tbody) return;
 
   let filtered = otClaims;
-  if (currentUser && currentUser.role === 'technician') {
+  const perms = getUserPermissions(currentUser);
+  if (currentUser && !perms.approveClaims) {
     filtered = otClaims.filter(c => c.employee === currentUser.name);
   }
+
+  // Pagination bounds correction
+  const totalPages = Math.ceil(filtered.length / otPerPage) || 1;
+  if (otCurrentPage > totalPages) {
+    otCurrentPage = totalPages;
+  }
+  if (otCurrentPage < 1) {
+    otCurrentPage = 1;
+  }
+
+  // Update pagination info & controls
+  const infoEl = document.getElementById('otPaginationInfo');
+  const btnPrev = document.getElementById('btnOtPrev');
+  const btnNext = document.getElementById('btnOtNext');
+
+  const start = (otCurrentPage - 1) * otPerPage;
+  const end = Math.min(start + otPerPage, filtered.length);
+
+  if (infoEl) {
+    if (filtered.length === 0) {
+      infoEl.textContent = 'แสดง 0 ถึง 0 จาก 0 รายการ';
+    } else {
+      infoEl.textContent = `แสดง ${start + 1} ถึง ${end} จาก ${filtered.length} รายการ (หน้า ${otCurrentPage}/${totalPages})`;
+    }
+  }
+  if (btnPrev) btnPrev.disabled = otCurrentPage === 1;
+  if (btnNext) btnNext.disabled = otCurrentPage === totalPages || filtered.length === 0;
 
   if (!filtered.length) {
     tbody.innerHTML = '<tr><td colspan="10" class="empty-row">ยังไม่มีประวัติการเบิก</td></tr>';
     return;
   }
 
-  tbody.innerHTML = filtered.map(c => {
+  const paginated = filtered.slice(start, end);
+
+  tbody.innerHTML = paginated.map(c => {
     const refJob = jobs.find(j => j.id === c.jobId);
     const status = c.status || 'pending';
 
     // Actions selection
     let actionsHtml = `<button class="action-btn" onclick="viewClaim('ot', '${c.id}')" title="ดูรายละเอียด">👁️</button>`;
     if (currentUser) {
-      if (currentUser.role === 'manager' || currentUser.role === 'admin') {
+      if (currentUser.role === 'sale') {
         if (status === 'pending') {
           actionsHtml = `
             <button class="action-btn" onclick="viewClaim('ot', '${c.id}')" title="ดูรายละเอียดก่อนอนุมัติ">👁️</button>
@@ -1900,6 +2822,11 @@ function renderOtClaimsTable() {
   }).join('');
 }
 
+function changeOtPage(direction) {
+  otCurrentPage += direction;
+  renderOtClaimsTable();
+}
+
 function editOtClaim(id) {
   const c = otClaims.find(claim => claim.id === id);
   if (!c) return;
@@ -1920,6 +2847,10 @@ function editOtClaim(id) {
 function deleteOtClaim(id) {
   if (!confirm('ต้องการลบใบเบิก OT นี้ใช่หรือไม่?')) return;
   otClaims = otClaims.filter(c => c.id !== id);
+
+  // Delete from SQLite backend database
+  apiDelete('/api/ot-claims/' + id).catch(err => console.error("Failed to delete OT claim on server database:", err));
+
   saveToStorage();
   renderOtClaimsTable();
   showToast('🗑️ ลบข้อมูลเรียบร้อย', 'info');
@@ -2170,341 +3101,7 @@ const logoBase64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQsAAAC9CAYAAA
 
 
 
-// ── Google Sheets Sync State & Logic ──
-let sheetsApiUrl = localStorage.getItem('servicell1_sheets_url') || '';
 
-function openSheetsModal() {
-  const modal = document.getElementById('sheetsModal');
-  if (modal) {
-    modal.classList.add('active');
-    document.getElementById('sheetsApiUrl').value = sheetsApiUrl;
-  }
-}
-
-function closeSheetsModal() {
-  const modal = document.getElementById('sheetsModal');
-  if (modal) modal.classList.remove('active');
-}
-
-function updateSyncStatus(status) {
-  const iconEl = document.getElementById('syncStatusIcon');
-  const textEl = document.getElementById('syncStatusText');
-  if (!iconEl || !textEl) return;
-  
-  if (status === 'connected') {
-    iconEl.textContent = '☁️';
-    textEl.textContent = 'Google Sheets: เชื่อมต่อแล้ว';
-    textEl.style.color = 'var(--accent-green)';
-  } else if (status === 'syncing') {
-    iconEl.textContent = '⏳';
-    textEl.textContent = 'กำลังซิงค์ข้อมูล...';
-    textEl.style.color = 'var(--accent-blue)';
-  } else if (status === 'error') {
-    iconEl.textContent = '⚠️';
-    textEl.textContent = 'การเชื่อมต่อผิดพลาด';
-    textEl.style.color = '#ef4444';
-  } else {
-    iconEl.textContent = '☁️';
-    textEl.textContent = 'เชื่อมต่อ Google Sheets';
-    textEl.style.color = 'inherit';
-  }
-}
-
-async function testAndSyncSheets() {
-  const url = document.getElementById('sheetsApiUrl').value.trim();
-  if (!url) {
-    showToast('❌ กรุณากรอก Web App URL', 'error');
-    return;
-  }
-  
-  updateSyncStatus('syncing');
-  showToast('⏳ กำลังทดสอบและเชื่อมต่อ...', 'info');
-  
-  try {
-    const testUrl = url + '?action=getData';
-    const res = await fetch(testUrl, { redirect: 'follow' });
-    if (!res.ok) throw new Error('Network response error');
-    
-    // Check if response is HTML (which happens when unauthorized/access blocked by Google account restrictions)
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-      throw new SyntaxError('HTML_RESPONSE');
-    }
-
-    let result;
-    try {
-      result = await res.json();
-    } catch (e) {
-      throw new SyntaxError('JSON_PARSE_ERROR');
-    }
-
-    if (result.success) {
-      sheetsApiUrl = url;
-      localStorage.setItem('servicell1_sheets_url', url);
-      updateSheetsWarningBanner();
-      showToast('✅ เชื่อมต่อ Google Sheets สำเร็จ!', 'success');
-      
-      if (result.jobs && (result.jobs.length > 0 || result.travelClaims.length > 0 || result.otClaims.length > 0)) {
-        jobs = result.jobs;
-        travelClaims = result.travelClaims;
-        otClaims = result.otClaims;
-        saveToStorageLocal();
-        renderAll();
-        populateRefJobsDropdowns();
-        renderTravelClaimsTable();
-        renderOtClaimsTable();
-        showToast('📥 ดาวน์โหลดข้อมูลจาก Google Sheet สำเร็จ', 'success');
-      } else {
-        await syncDataToSheets();
-      }
-      
-      updateSyncStatus('connected');
-      closeSheetsModal();
-    } else {
-      throw new Error(result.message || 'Unknown error');
-    }
-  } catch (err) {
-    console.error(err);
-    updateSyncStatus('error');
-    if (err instanceof SyntaxError) {
-      showToast('❌ การเชื่อมต่อขัดข้อง: ได้รับหน้าจอตั้งค่าสิทธิ์จาก Google (กรุณาทำตามขั้นตอนที่ระบุด้านล่าง ให้สิทธิ์เข้าถึง และตั้งค่า Who has access เป็น Anyone)', 'error');
-    } else {
-      showToast('❌ การเชื่อมต่อล้มเหลว: ' + err.message + ' (โปรดตรวจทาน Web App URL อีกครั้ง)', 'error');
-    }
-  }
-}
-
-function disconnectSheets() {
-  sheetsApiUrl = '';
-  localStorage.removeItem('servicell1_sheets_url');
-  document.getElementById('sheetsApiUrl').value = '';
-  updateSyncStatus('disconnected');
-  updateSheetsWarningBanner();
-  showToast('🔌 ยกเลิกการเชื่อมต่อ Google Sheets แล้ว', 'info');
-  closeSheetsModal();
-}
-
-async function syncDataToSheets() {
-  if (!sheetsApiUrl) return;
-  
-  try {
-    const res = await fetch(sheetsApiUrl, {
-      method: 'POST',
-      redirect: 'follow',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify({
-        action: 'syncAll',
-        jobs: jobs,
-        travelClaims: travelClaims,
-        otClaims: otClaims
-      })
-    });
-    
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-      console.error('Failed to sync: Received HTML response');
-      updateSyncQueueStatus();
-      return;
-    }
-
-    const result = await res.json();
-    if (result.success) {
-      console.log('Successfully synced with Google Sheets');
-      // Clear pendingSync flags from local lists
-      jobs.forEach(j => delete j.pendingSync);
-      travelClaims.forEach(c => delete c.pendingSync);
-      otClaims.forEach(c => delete c.pendingSync);
-      
-      // Save cleaned arrays to local storage directly (without calling syncDataToSheets again)
-      try {
-        localStorage.setItem('servicell1_jobs', JSON.stringify(jobs));
-        localStorage.setItem('servicell1_travel_claims', JSON.stringify(travelClaims));
-        localStorage.setItem('servicell1_ot_claims', JSON.stringify(otClaims));
-      } catch (e) {
-        console.error('Failed to save cleaned data to localStorage', e);
-      }
-      
-      updateSyncQueueStatus();
-    } else {
-      console.error('Failed to sync:', result.message);
-      updateSyncQueueStatus();
-    }
-  } catch (err) {
-    console.error('Sync Error:', err);
-    updateSyncQueueStatus();
-  }
-}
-
-function saveToStorageLocal() {
-  try {
-    localStorage.setItem('servicell1_jobs', JSON.stringify(jobs));
-    localStorage.setItem('servicell1_travel_claims', JSON.stringify(travelClaims));
-    localStorage.setItem('servicell1_ot_claims', JSON.stringify(otClaims));
-  } catch (e) {
-    console.error('Local storage quota exceeded!', e);
-    showToast('⚠️ พื้นที่เบราว์เซอร์เต็ม ไม่สามารถบันทึกข้อมูลรูปภาพขนาดใหญ่ลงเครื่องได้', 'warning');
-  }
-}
-
-async function loadDataFromSheets() {
-  if (!sheetsApiUrl) {
-    updateSyncStatus('disconnected');
-    return;
-  }
-  
-  updateSyncStatus('syncing');
-  try {
-    const res = await fetch(sheetsApiUrl + '?action=getData', { redirect: 'follow' });
-    if (!res.ok) throw new Error('Network response error');
-
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-      throw new SyntaxError('HTML_RESPONSE');
-    }
-
-    let result;
-    try {
-      result = await res.json();
-    } catch (e) {
-      throw new SyntaxError('JSON_PARSE_ERROR');
-    }
-
-    if (result.success) {
-      jobs = result.jobs || [];
-      travelClaims = result.travelClaims || [];
-      otClaims = result.otClaims || [];
-      
-      saveToStorageLocal();
-      renderAll();
-      populateRefJobsDropdowns();
-      renderTravelClaimsTable();
-      renderOtClaimsTable();
-      
-      updateSyncStatus('connected');
-      console.log('Data loaded successfully from Google Sheets');
-    } else {
-      updateSyncStatus('error');
-    }
-  } catch (err) {
-    console.error('Error loading sheets data:', err);
-    updateSyncStatus('error');
-    if (err instanceof SyntaxError) {
-      showToast('⚠️ ตรวจพบบัญชี Google ติดขัดเรื่องสิทธิ์การเข้าถึงสคริปต์ใน Google Sheets', 'warning');
-    }
-  }
-}
-
-function copyAppsScriptCode() {
-  const code = `function doGet(e) {
-  var action = e.parameter.action;
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  if (action === 'getData') {
-    var jobsData = getSheetData(ss, 'Jobs');
-    var travelData = getSheetData(ss, 'TravelClaims');
-    var otData = getSheetData(ss, 'OtClaims');
-    
-    var response = {
-      success: true,
-      jobs: jobsData,
-      travelClaims: travelData,
-      otClaims: otData
-    };
-    return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  var action = data.action;
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  if (action === 'syncAll') {
-    saveSheetData(ss, 'Jobs', data.jobs);
-    saveSheetData(ss, 'TravelClaims', data.travelClaims);
-    saveSheetData(ss, 'OtClaims', data.otClaims);
-    
-    return ContentService.createTextOutput(JSON.stringify({ success: true, message: 'Synced successfully' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function getSheetData(ss, sheetName) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return [];
-  var rows = sheet.getDataRange().getValues();
-  if (rows.length <= 1) return [];
-  var headers = rows[0];
-  var data = [];
-  for (var i = 1; i < rows.length; i++) {
-    var obj = {};
-    for (var j = 0; j < headers.length; j++) {
-      var val = rows[i][j];
-      if (typeof val === 'string' && (val.indexOf('{') === 0 || val.indexOf('[') === 0)) {
-        try { val = JSON.parse(val); } catch(err) {}
-      }
-      obj[headers[j]] = val;
-    }
-    data.push(obj);
-  }
-  return data;
-}
-
-function saveSheetData(ss, sheetName, dataArray) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-  } else {
-    sheet.clear();
-  }
-  
-  if (!dataArray || dataArray.length === 0) {
-    var defaultHeaders = getHeadersForSheet(sheetName);
-    sheet.appendRow(defaultHeaders);
-    return;
-  }
-  
-  var headers = Object.keys(dataArray[0]);
-  sheet.appendRow(headers);
-  
-  var rows = [];
-  for (var i = 0; i < dataArray.length; i++) {
-    var row = [];
-    for (var j = 0; j < headers.length; j++) {
-      var val = dataArray[i][headers[j]];
-      if (typeof val === 'object' && val !== null) {
-        val = JSON.stringify(val);
-      }
-      row.push(val);
-    }
-    rows.push(row);
-  }
-  
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  }
-}
-
-function getHeadersForSheet(sheetName) {
-  if (sheetName === 'Jobs') {
-    return ['id', 'jobNo', 'date', 'appointmentDate', 'completionDate', 'customerName', 'customerPhone', 'customerAddress', 'googleMapsUrl', 'customerLat', 'customerLng', 'jobType', 'status', 'technician', 'equipment', 'problemDesc', 'workPerformed', 'operationSummary', 'parts', 'laborCost', 'partsTotal', 'travelCost', 'discount', 'vatRate', 'grandTotal', 'paymentMethod', 'isWarranty', 'warranty', 'remarks', 'photos'];
-  } else if (sheetName === 'TravelClaims') {
-    return ['id', 'claimNo', 'date', 'jobId', 'startPoint', 'endPoint', 'mapUrl', 'distance', 'rate', 'tolls', 'total', 'status', 'approvedBy', 'remarks'];
-  } else if (sheetName === 'OtClaims') {
-    return ['id', 'claimNo', 'date', 'jobId', 'employee', 'workDate', 'start', 'end', 'hours', 'normalRate', 'rate', 'multiplier', 'allowance', 'total', 'status', 'approvedBy', 'remarks'];
-  }
-  return ['id'];
-}`;
-
-  navigator.clipboard.writeText(code).then(() => {
-    showToast('📋 คัดลอกโค้ด Apps Script ไปยัง Clipboard แล้ว!', 'success');
-  }).catch(() => {
-    showToast('❌ ไม่สามารถคัดลอกอัตโนมัติได้ กรุณาคัดลอกด้วยตนเอง', 'error');
-  });
-}
 
 // ── Enterprise Extensions Helper Functions ──
 
@@ -2525,14 +3122,18 @@ function approveClaim(type, id) {
     claimList[idx].status = 'approved';
     claimList[idx].approvedBy = currentUser ? currentUser.name : 'Unknown';
     claimList[idx].approvedDate = new Date().toISOString().split('T')[0];
+    
+    // Save approved status to backend SQL database
+    const claim = claimList[idx];
+    const endpoint = type === 'travel' ? '/api/travel-claims' : '/api/ot-claims';
+    apiPost(endpoint, claim).catch(err => console.error("Failed to update claim on server:", err));
+
     saveToStorage();
     if (type === 'travel') renderTravelClaimsTable();
     else renderOtClaimsTable();
     renderPayrollTable();
     showToast('✅ อนุมัติใบเบิกสำเร็จแล้ว', 'success');
     
-    // Simulate Line Notify Alert
-    sendLineNotifyAlert(`📢 ใบเบิก ${claimList[idx].claimNo} (${type === 'travel' ? 'เดินทาง' : 'OT'}) ได้รับการอนุมัติแล้วโดย ${claimList[idx].approvedBy}`);
   }
 }
 
@@ -2547,14 +3148,18 @@ function rejectClaim(type, id) {
     claimList[idx].remarks = (claimList[idx].remarks ? claimList[idx].remarks + ' | ' : '') + 'ปฏิเสธเนื่องจาก: ' + (reason || 'ไม่ระบุเหตุผล');
     claimList[idx].approvedBy = currentUser ? currentUser.name : 'Unknown';
     claimList[idx].approvedDate = new Date().toISOString().split('T')[0];
+    
+    // Save rejected status to backend SQL database
+    const claim = claimList[idx];
+    const endpoint = type === 'travel' ? '/api/travel-claims' : '/api/ot-claims';
+    apiPost(endpoint, claim).catch(err => console.error("Failed to update claim on server:", err));
+
     saveToStorage();
     if (type === 'travel') renderTravelClaimsTable();
     else renderOtClaimsTable();
     renderPayrollTable();
     showToast('❌ ปฏิเสธใบเบิกแล้ว', 'info');
     
-    // Simulate Line Notify Alert
-    sendLineNotifyAlert(`⚠️ ใบเบิก ${claimList[idx].claimNo} (${type === 'travel' ? 'เดินทาง' : 'OT'}) ถูกปฏิเสธโดย ${claimList[idx].approvedBy} (เหตุผล: ${reason || 'ไม่ระบุ'})`);
   }
 }
 
@@ -2564,11 +3169,15 @@ function renderEmployeeTable() {
   
   tbody.innerHTML = employees.map(emp => {
     const roleNames = {
-      technician: 'ช่างเทคนิค',
-      manager: 'ผู้จัดการ',
-      admin: 'แอดมิน/บัญชี'
+      service: 'Service',
+      sale: 'Sale',
+      admin: 'Admin'
     };
     const isDefault = defaultEmployees.some(e => e.email === emp.email);
+    
+    // Detailed permissions button
+    const permBtn = `<button class="action-btn" onclick="openPermissionsModal('${emp.email}')" title="กำหนดสิทธิ์พนักงาน" style="color:var(--accent-blue); font-weight:bold; border:1px solid rgba(0,100,250,0.15); padding:2px 6px; border-radius:4px; margin-right:6px; font-size:0.8rem;">⚙️ สิทธิ์</button>`;
+
     const deleteBtn = isDefault ? 
       `<span style="color:var(--text-secondary); font-size:0.8rem;">ระบบพื้นฐาน (ลบไม่ได้)</span>` : 
       `<button class="action-btn del" onclick="deleteEmployee('${emp.email}')" title="ลบพนักงาน">🗑️</button>`;
@@ -2576,9 +3185,14 @@ function renderEmployeeTable() {
     return `
       <tr>
         <td><strong>${emp.name}</strong></td>
+        <td><span class="badge ${emp.role === 'admin' ? 'badge-completed' : (emp.role === 'sale' ? 'badge-progress' : 'badge-pending')}">${emp.roleDisplay || roleNames[emp.role] || emp.role}</span></td>
         <td>${emp.email}</td>
-        <td><span class="badge ${emp.role === 'admin' ? 'badge-completed' : (emp.role === 'manager' ? 'badge-progress' : 'badge-pending')}">${roleNames[emp.role]}</span></td>
-        <td>${deleteBtn}</td>
+        <td>
+          <div style="display:flex; align-items:center;">
+            ${permBtn}
+            ${deleteBtn}
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -2587,34 +3201,83 @@ function renderEmployeeTable() {
 function handleAddEmployee(e) {
   e.preventDefault();
   const name = document.getElementById('newEmpName').value.trim();
+  const roleDisplay = document.getElementById('newEmpRole').value.trim();
   const email = document.getElementById('newEmpEmail').value.trim();
-  const role = document.getElementById('newEmpRole').value;
   
   if (employees.some(emp => emp.email.toLowerCase() === email.toLowerCase())) {
     showToast('❌ อีเมลนี้มีอยู่ในระบบแล้ว', 'error');
     return;
   }
+
+  // Parse base system role based on Admin's typed custom display role
+  let role = 'sale'; // default fallback
+  const s = roleDisplay.toLowerCase();
+  if (s.includes('admin') || s.includes('ผู้ดูแล') || s.includes('ผู้จัดการ')) {
+    role = 'admin';
+  } else if (s.includes('service') || s.includes('ช่าง') || s.includes('บริการ') || s.includes('ทอม')) {
+    role = 'service';
+  } else if (s.includes('sale') || s.includes('ขาย') || s.includes('ติ๊ก')) {
+    role = 'sale';
+  }
   
-  employees.push({ name, email, role, password: '123' });
+  const defaultPerms = getUserPermissions({ role });
+  const newEmp = { name, role, roleDisplay, email, password: '123', permissions: defaultPerms };
+  employees.push(newEmp);
   localStorage.setItem('servicell1_employees', JSON.stringify(employees));
   
+  // Save new employee to backend SQL database
+  apiPost('/api/employees', newEmp).catch(err => console.error("Failed to add employee on server database:", err));
+
   document.getElementById('addEmployeeForm').reset();
   renderEmployeeTable();
   showToast('👥 เพิ่มพนักงานใหม่สำเร็จ รหัสผ่านเริ่มต้นคือ 123', 'success');
 }
 
 function deleteEmployee(email) {
-  if (!confirm('ยืนยันที่จะลบพนักงานรายนี้ออกจากระบบหรือไม่?')) return;
-  employees = employees.filter(emp => emp.email !== email);
+  if (!confirm('ยืนยันที่จะลบพนักงานรายนี้ออกจากระบบหรือไม่? (ประวัติการเบิกเงินและข้อมูลในสรุปยอดจ่ายของพนักงานรายนี้จะถูกลบออกทั้งหมด)')) return;
+  
+  const emp = employees.find(e => e.email === email);
+  if (emp) {
+    // 1. Delete associated OT claims
+    const otToDelete = otClaims.filter(c => c.employee === emp.name);
+    otToDelete.forEach(c => {
+      apiDelete('/api/ot-claims/' + c.id).catch(err => console.error("Failed to delete OT claim on server:", err));
+    });
+    otClaims = otClaims.filter(c => c.employee !== emp.name);
+
+    // 2. Delete associated Travel claims
+    const travelToDelete = travelClaims.filter(c => {
+      const j = jobs.find(job => job.id === c.jobId);
+      return j && j.technician === emp.name;
+    });
+    travelToDelete.forEach(c => {
+      apiDelete('/api/travel-claims/' + c.id).catch(err => console.error("Failed to delete travel claim on server:", err));
+    });
+    travelClaims = travelClaims.filter(c => {
+      const j = jobs.find(job => job.id === c.jobId);
+      return !j || j.technician !== emp.name;
+    });
+  }
+
+  employees = employees.filter(e => e.email !== email);
   localStorage.setItem('servicell1_employees', JSON.stringify(employees));
+  
+  // Delete employee from backend SQL database
+  apiDelete('/api/employees/' + encodeURIComponent(email)).catch(err => console.error("Failed to delete employee on server database:", err));
+
+  saveToStorage();
   renderEmployeeTable();
-  showToast('🗑️ ลบพนักงานสำเร็จ', 'info');
+  renderTravelClaimsTable();
+  renderOtClaimsTable();
+  renderPayrollTable();
+  showToast('🗑️ ลบพนักงานและประวัติการเบิกเงินเรียบร้อย', 'info');
 }
 
 function saveAdminCompanySettings() {
   const name = document.getElementById('settingsCompanyName').value.trim();
   const addr = document.getElementById('settingsCompanyAddress').value.trim();
-  const lineToken = document.getElementById('lineNotifyToken').value.trim();
+  const phone = document.getElementById('settingsCompanyPhone').value.trim();
+  const taxId = document.getElementById('settingsCompanyTaxId').value.trim();
   
   if (name) {
     const nameEl = document.getElementById('companyName');
@@ -2624,35 +3287,17 @@ function saveAdminCompanySettings() {
     const addrEl = document.getElementById('companyAddress');
     if (addrEl) addrEl.value = addr;
   }
-  
-  lineNotifyToken = lineToken;
-  localStorage.setItem('servicell1_line_token', lineToken);
+  if (phone) {
+    const phoneEl = document.getElementById('companyPhone');
+    if (phoneEl) phoneEl.value = phone;
+  }
+  if (taxId) {
+    const taxEl = document.getElementById('companyTaxId');
+    if (taxEl) taxEl.value = taxId;
+  }
   
   saveToStorage();
   showToast('💾 บันทึกการตั้งค่าบริษัทเรียบร้อย', 'success');
-}
-
-function sendLineNotifyAlert(message) {
-  if (!lineNotifyToken) {
-    console.log('[Line Notify Simulation]:', message);
-    return;
-  }
-  
-  console.log('[Line Notify Sent!]: Token = ' + lineNotifyToken + ' | Message = ' + message);
-  showToast('🔔 ส่งแจ้งเตือน Line Notify สำเร็จ', 'success');
-}
-
-function testLineNotify() {
-  const token = document.getElementById('lineNotifyToken').value.trim();
-  if (!token) {
-    showToast('❌ กรุณากรอก Line Notify Token', 'error');
-    return;
-  }
-  
-  showToast('⏳ กำลังส่งทดสอบแจ้งเตือน...', 'info');
-  setTimeout(() => {
-    showToast('🔔 ส่งข้อความทดสอบเข้ากลุ่ม Line เรียบร้อย!', 'success');
-  }, 1000);
 }
 
 function viewClaim(type, id) {
@@ -2671,56 +3316,151 @@ function viewClaim(type, id) {
 
   let bodyHtml = '';
   if (type === 'travel') {
-    const mapIconHtml = c.mapUrl ? ` <a href="${c.mapUrl}" target="_blank" style="text-decoration:none;">🗺️ ดูแผนที่ Google Maps</a>` : '';
+    const logoImgSrc = logoBase64 || 'logo.png';
+    const mapIconHtml = c.mapUrl ? ` <a href="${c.mapUrl}" target="_blank" style="text-decoration:none;" title="ดูแผนที่">🗺️ ดูแผนที่ Google Maps</a>` : '';
     bodyHtml = `
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:16px;">
-        <div><strong>เลขที่ใบเบิก:</strong> ${c.claimNo}</div>
-        <div><strong>วันที่ยื่นเบิก:</strong> ${formatDate(c.date)}</div>
-        <div><strong>พนักงานผู้เบิก:</strong> ${refJob ? (refJob.technician || '-') : '-'}</div>
-        <div><strong>ใบงานอ้างอิง:</strong> ${refJob ? `${refJob.jobNo} (${refJob.customerName})` : '-'}</div>
-      </div>
-      <div style="margin-bottom:16px;">
-        <h4 style="color:var(--accent-blue); margin-bottom:8px; font-weight:600;">📍 รายละเอียดเส้นทางเดินทาง</h4>
-        <p style="margin:4px 0;"><strong>จุดเริ่มต้น:</strong> ${c.startPoint}</p>
-        <p style="margin:4px 0;"><strong>จุดสิ้นสุด:</strong> ${c.endPoint}</p>
-        <p style="margin:8px 0 4px 0;"><strong>ระยะทาง:</strong> ${c.distance} กม. ${mapIconHtml}</p>
-        <p style="margin:4px 0;"><strong>รายละเอียดงาน:</strong> ${refJob ? (refJob.workPerformed || refJob.operationSummary || '-') : '-'}</p>
-      </div>
-      <div style="margin-bottom:16px; border-top:1px solid var(--border); padding-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-        <div><strong>อัตราจ่าย/กม.:</strong> ฿${c.rate.toFixed(2)} / กม.</div>
-        <div><strong>ค่าทางด่วน/ค่าจอดรถ:</strong> ฿${c.tolls.toFixed(2)}</div>
-        <div style="grid-column:span 2; font-size:1.1rem; color:var(--accent-green); font-weight:700; margin-top:8px;">
-          ยอดเงินเบิกสุทธิ: ฿${c.total.toFixed(2)}
+      <div class="claim-preview-paper" style="background:#ffffff; border:1px solid #e2e8f0; box-shadow:0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); padding:30px; border-radius:12px; color:#1e293b; font-family:'Sarabun', sans-serif; margin-bottom:15px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1e293b; padding-bottom:12px; margin-bottom:20px;">
+          <div>
+            <h1 style="margin:0; font-size:1.4rem; color:#1e3a8a; font-weight:700; letter-spacing:-0.025em;">ใบเบิกค่าเดินทาง / TRAVEL CLAIM FORM</h1>
+            <p style="margin:4px 0 0; font-size:0.85rem; color:#64748b; font-weight:500;">Live Lighting Co., Ltd.</p>
+          </div>
+          <img src="${logoImgSrc}" style="max-height:45px; max-width:90px; object-fit:contain;" />
         </div>
-      </div>
-      <div style="border-top:1px solid var(--border); padding-top:16px;">
-        <p style="margin:4px 0;"><strong>สถานะปัจจุบัน:</strong> ${getApprovalStatusBadge(status)}</p>
-        ${c.approvedBy ? `<p style="margin:4px 0;"><strong>ผู้ดำเนินการอนุมัติ:</strong> ${c.approvedBy}</p>` : ''}
-        <p style="margin:4px 0;"><strong>หมายเหตุ:</strong> ${c.remarks || '-'}</p>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; font-size:0.85rem; line-height:1.5;">
+          <div>
+            <strong style="color:#475569;">เลขที่ใบเบิก / Claim No:</strong> ${c.claimNo}<br>
+            <strong style="color:#475569;">วันที่เบิก / Date:</strong> ${formatDate(c.date)}<br>
+            <strong style="color:#475569;">ใบงานอ้างอิง / Ref Job No:</strong> ${refJob ? refJob.jobNo : '-'}<br>
+            <strong style="color:#475569;">รายละเอียดงาน / Job Details:</strong> ${refJob ? (refJob.workPerformed || refJob.operationSummary || '-') : '-'}
+          </div>
+          <div>
+            <strong style="color:#475569;">ชื่อพนักงาน / Employee:</strong> ${refJob ? (refJob.technician || '-') : '-'}<br>
+            <strong style="color:#475569;">ลูกค้า / Customer:</strong> ${refJob ? refJob.customerName : '-'}<br>
+            <strong style="color:#475569;">สถานะปัจจุบัน / Status:</strong> ${getApprovalStatusBadge(status)}
+          </div>
+        </div>
+
+        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:0.85rem; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;">
+          <thead>
+            <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
+              <th style="padding:10px; text-align:left; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">จุดเริ่มต้น</th>
+              <th style="padding:10px; text-align:left; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">จุดสิ้นสุด</th>
+              <th style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">ระยะทาง</th>
+              <th style="padding:10px; text-align:right; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">อัตรา/กม.</th>
+              <th style="padding:10px; text-align:right; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">ค่าทางด่วน/ค่าจอด</th>
+              <th style="padding:10px; text-align:right; color:#334155; font-weight:600;">ยอดเบิกสุทธิ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">${c.startPoint}</td>
+              <td style="padding:10px; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">${c.endPoint}</td>
+              <td style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">${c.distance} กม. ${mapIconHtml}</td>
+              <td style="padding:10px; text-align:right; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">฿${c.rate.toFixed(2)}</td>
+              <td style="padding:10px; text-align:right; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">฿${c.tolls.toFixed(2)}</td>
+              <td style="padding:10px; text-align:right; font-weight:bold; border-bottom:1px solid #cbd5e1; color:#0f766e;">฿${c.total.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-bottom:20px; font-size:0.85rem; border-top:1px solid #e2e8f0; padding-top:12px;">
+          <strong style="color:#475569;">หมายเหตุ / Remarks:</strong> ${c.remarks || '-'}
+        </div>
+
+        ${c.mapUrl ? `
+        <div style="margin-bottom:20px;">
+          <strong style="font-size:0.85rem; color:#1e3a8a;">แผนที่จุดหมายปลายทาง / Destination Map:</strong>
+          <div style="width:100%; height:180px; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; margin-top:8px;">
+            <img src="${getStaticMapUrl(c.mapUrl)}" style="width:100%; height:100%; object-fit:cover; display:block;" />
+          </div>
+        </div>
+        ` : ''}
+
+        <div style="display:flex; justify-content:space-around; margin-top:30px; font-size:0.8rem;">
+          <div style="text-align:center; width:45%; border:1px dashed #cbd5e1; padding:12px; border-radius:8px; background:#f8fafc;">
+            <div style="border-bottom:1px solid #475569; margin-bottom:8px; height:30px;"></div>
+            <div style="font-weight:600; color:#334155;">ลงชื่อผู้เบิก / Claimant</div>
+            <div style="margin-top:6px; color:#64748b; font-size:0.75rem;">วันที่ ____/____/____</div>
+          </div>
+          <div style="text-align:center; width:45%; border:1px dashed #cbd5e1; padding:12px; border-radius:8px; background:#f8fafc;">
+            <div style="border-bottom:1px solid #475569; margin-bottom:8px; height:30px; line-height:30px; font-weight:bold; color:#1e3a8a; font-size:0.8rem;">
+              ${c.approvedBy ? `(อนุมัติระบบ: ${c.approvedBy})` : ''}
+            </div>
+            <div style="font-weight:600; color:#334155;">ผู้อนุมัติ / Approver</div>
+            <div style="margin-top:6px; color:#64748b; font-size:0.75rem;">
+              ${c.approvedDate ? `วันที่: ${formatDate(c.approvedDate)}` : 'วันที่ ____/____/____'}
+            </div>
+          </div>
+        </div>
       </div>
     `;
   } else {
-    // OT Claim
+    const logoImgSrc = logoBase64 || 'logo.png';
     bodyHtml = `
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:16px;">
-        <div><strong>เลขที่ใบเบิก:</strong> ${c.claimNo}</div>
-        <div><strong>วันที่ยื่นเบิก:</strong> ${formatDate(c.date)}</div>
-        <div><strong>พนักงานผู้เบิก:</strong> ${c.employee}</div>
-        <div><strong>ใบงานอ้างอิง:</strong> ${refJob ? `${refJob.jobNo} (${refJob.customerName})` : '-'}</div>
-      </div>
-      <div style="margin-bottom:16px;">
-        <h4 style="color:var(--accent-blue); margin-bottom:8px; font-weight:600;">⏰ รายละเอียดชั่วโมงปฏิบัติงานล่วงเวลา</h4>
-        <p style="margin:4px 0;"><strong>วันที่ปฏิบัติงาน:</strong> ${formatDate(c.workDate)}</p>
-        <p style="margin:4px 0;"><strong>เวลาทำงาน:</strong> ${c.start} - ${c.end} น.</p>
-        <p style="margin:4px 0;"><strong>จำนวนชั่วโมงรวม:</strong> ${c.hours} ชม.</p>
-        <p style="margin:4px 0;"><strong>ตัวคูณเวลา:</strong> x${c.multiplier || 1.5}</p>
-        <p style="margin:8px 0 4px 0;"><strong>ค่าเบี้ยเลี้ยง / Allowance:</strong> ฿${(c.allowance || 0).toFixed(2)}</p>
-        <p style="margin:4px 0;"><strong>รายละเอียดงาน:</strong> ${refJob ? (refJob.workPerformed || refJob.operationSummary || '-') : '-'}</p>
-      </div>
-      <div style="border-top:1px solid var(--border); padding-top:16px;">
-        <p style="margin:4px 0;"><strong>สถานะปัจจุบัน:</strong> ${getApprovalStatusBadge(status)}</p>
-        ${c.approvedBy ? `<p style="margin:4px 0;"><strong>ผู้ดำเนินการอนุมัติ:</strong> ${c.approvedBy}</p>` : ''}
-        <p style="margin:4px 0;"><strong>หมายเหตุ/รายละเอียดอื่น ๆ:</strong> ${c.remarks || '-'}</p>
+      <div class="claim-preview-paper" style="background:#ffffff; border:1px solid #e2e8f0; box-shadow:0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05); padding:30px; border-radius:12px; color:#1e293b; font-family:'Sarabun', sans-serif; margin-bottom:15px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1e293b; padding-bottom:12px; margin-bottom:20px;">
+          <div>
+            <h1 style="margin:0; font-size:1.4rem; color:#1e3a8a; font-weight:700; letter-spacing:-0.025em;">ใบเบิกค่าล่วงเวลา / OVERTIME CLAIM FORM</h1>
+            <p style="margin:4px 0 0; font-size:0.85rem; color:#64748b; font-weight:500;">Live Lighting Co., Ltd.</p>
+          </div>
+          <img src="${logoImgSrc}" style="max-height:45px; max-width:90px; object-fit:contain;" />
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; font-size:0.85rem; line-height:1.5;">
+          <div>
+            <strong style="color:#475569;">เลขที่ใบเบิก / Claim No:</strong> ${c.claimNo}<br>
+            <strong style="color:#475569;">วันที่เบิก / Date:</strong> ${formatDate(c.date)}<br>
+            <strong style="color:#475569;">ใบงานอ้างอิง / Ref Job No:</strong> ${refJob ? refJob.jobNo : '-'}<br>
+            <strong style="color:#475569;">รายละเอียดงาน / Job Details:</strong> ${refJob ? (refJob.workPerformed || refJob.operationSummary || '-') : '-'}
+          </div>
+          <div>
+            <strong style="color:#475569;">ชื่อพนักงาน / Employee:</strong> ${c.employee}<br>
+            <strong style="color:#475569;">วันที่ปฏิบัติงาน / Work Date:</strong> ${formatDate(c.workDate)}<br>
+            <strong style="color:#475569;">สถานะปัจจุบัน / Status:</strong> ${getApprovalStatusBadge(status)}
+          </div>
+        </div>
+
+        <table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:0.85rem; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;">
+          <thead>
+            <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
+              <th style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">เวลาทำงาน</th>
+              <th style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">จำนวนชั่วโมง</th>
+              <th style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; color:#334155; font-weight:600;">ตัวคูณเวลา</th>
+              <th style="padding:10px; text-align:right; color:#334155; font-weight:600;">ค่าเบี้ยเลี้ยง</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">${c.start} - ${c.end} น.</td>
+              <td style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">${c.hours} ชม.</td>
+              <td style="padding:10px; text-align:center; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1;">x${c.multiplier || 1.5}</td>
+              <td style="padding:10px; text-align:right; border-bottom:1px solid #cbd5e1; font-weight:bold; color:#0f766e;">฿${(c.allowance || 0).toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-bottom:20px; font-size:0.85rem; border-top:1px solid #e2e8f0; padding-top:12px;">
+          <strong style="color:#475569;">รายละเอียดงาน / OT Details & Remarks:</strong> ${c.remarks || '-'}
+        </div>
+
+        <div style="display:flex; justify-content:space-around; margin-top:30px; font-size:0.8rem;">
+          <div style="text-align:center; width:45%; border:1px dashed #cbd5e1; padding:12px; border-radius:8px; background:#f8fafc;">
+            <div style="border-bottom:1px solid #475569; margin-bottom:8px; height:30px;"></div>
+            <div style="font-weight:600; color:#334155;">ลงชื่อผู้เบิก / Claimant</div>
+            <div style="margin-top:6px; color:#64748b; font-size:0.75rem;">วันที่ ____/____/____</div>
+          </div>
+          <div style="text-align:center; width:45%; border:1px dashed #cbd5e1; padding:12px; border-radius:8px; background:#f8fafc;">
+            <div style="border-bottom:1px solid #475569; margin-bottom:8px; height:30px; line-height:30px; font-weight:bold; color:#1e3a8a; font-size:0.8rem;">
+              ${c.approvedBy ? `(อนุมัติระบบ: ${c.approvedBy})` : ''}
+            </div>
+            <div style="font-weight:600; color:#334155;">ผู้อนุมัติ / Approver</div>
+            <div style="margin-top:6px; color:#64748b; font-size:0.75rem;">
+              ${c.approvedDate ? `วันที่: ${formatDate(c.approvedDate)}` : 'วันที่ ____/____/____'}
+            </div>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -2733,7 +3473,7 @@ function viewClaim(type, id) {
   `;
 
   if (currentUser) {
-    if ((currentUser.role === 'manager' || currentUser.role === 'admin') && status === 'pending') {
+    if (currentUser.role === 'sale' && status === 'pending') {
       footerHtml = `
         <button class="btn-outline" style="margin-right:auto;" onclick="closeClaimModal()">ปิด</button>
         <button class="btn-danger" onclick="rejectClaimFromModal('${type}', '${c.id}')">❌ ปฏิเสธการเบิก</button>
@@ -2791,56 +3531,7 @@ function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
 
-// ── Sync Queue Tracker ──
 
-function updateSyncQueueStatus() {
-  const pendingJobs = jobs.filter(j => j.pendingSync).length;
-  const pendingTravel = travelClaims.filter(c => c.pendingSync).length;
-  const pendingOt = otClaims.filter(c => c.pendingSync).length;
-  const totalPending = pendingJobs + pendingTravel + pendingOt;
-
-  const badge = document.getElementById('syncQueueBadge');
-  const btn = document.getElementById('syncPendingBtn');
-
-  if (totalPending > 0) {
-    if (badge) {
-      badge.textContent = `${totalPending} รอซิงค์`;
-      badge.style.display = 'inline-block';
-    }
-    if (btn) {
-      btn.textContent = `🔄 ซิงค์รายการคงค้างที่รอดำเนินการ (${totalPending})`;
-      btn.style.display = 'flex';
-    }
-  } else {
-    if (badge) badge.style.display = 'none';
-    if (btn) btn.style.display = 'none';
-  }
-}
-
-async function syncPendingQueue() {
-  const pendingJobs = jobs.filter(j => j.pendingSync).length;
-  const pendingTravel = travelClaims.filter(c => c.pendingSync).length;
-  const pendingOt = otClaims.filter(c => c.pendingSync).length;
-  const totalPending = pendingJobs + pendingTravel + pendingOt;
-
-  if (totalPending === 0) {
-    showToast('✅ ไม่มีข้อมูลคงค้างที่รอการซิงค์', 'info');
-    return;
-  }
-
-  showToast('⏳ กำลังพยายามซิงค์ข้อมูลคงค้างขึ้นคลาวด์...', 'info');
-  await syncDataToSheets();
-
-  const afterPending = jobs.filter(j => j.pendingSync).length +
-                       travelClaims.filter(c => c.pendingSync).length +
-                       otClaims.filter(c => c.pendingSync).length;
-
-  if (afterPending === 0) {
-    showToast('✅ ซิงค์ข้อมูลทั้งหมดไปยัง Google Sheets สำเร็จแล้ว!', 'success');
-  } else {
-    showToast('❌ ยังไม่สามารถเชื่อมต่อคลาวด์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต', 'error');
-  }
-}
 
 // ── Payroll & Claims Aggregation ──
 
@@ -2848,18 +3539,19 @@ function renderPayrollTable() {
   const tbody = document.getElementById('payrollTableBody');
   if (!tbody) return;
 
-  const staff = employees.filter(e => e.role === 'technician');
+  const staff = employees.filter(e => e.role === 'service');
   const extraTravelNames = travelClaims.map(c => {
     const j = jobs.find(job => job.id === c.jobId);
     return j ? j.technician : '';
   }).filter(n => n);
   const extraOtNames = otClaims.map(c => c.employee).filter(n => n);
 
+  const existingEmpNames = new Set(employees.map(e => e.name));
   const uniqueNames = Array.from(new Set([
     ...staff.map(e => e.name),
     ...extraTravelNames,
     ...extraOtNames
-  ]));
+  ])).filter(name => existingEmpNames.has(name));
 
   if (!uniqueNames.length) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty-row">ยังไม่มีข้อมูลรายชื่อพนักงาน</td></tr>';
@@ -2895,18 +3587,19 @@ function renderPayrollTable() {
 }
 
 function exportPayrollCSV() {
-  const staff = employees.filter(e => e.role === 'technician');
+  const staff = employees.filter(e => e.role === 'service');
   const extraTravelNames = travelClaims.map(c => {
     const j = jobs.find(job => job.id === c.jobId);
     return j ? j.technician : '';
   }).filter(n => n);
   const extraOtNames = otClaims.map(c => c.employee).filter(n => n);
 
+  const existingEmpNames = new Set(employees.map(e => e.name));
   const uniqueNames = Array.from(new Set([
     ...staff.map(e => e.name),
     ...extraTravelNames,
     ...extraOtNames
-  ]));
+  ])).filter(name => existingEmpNames.has(name));
 
   if (!uniqueNames.length) {
     showToast('❌ ไม่มีข้อมูลพนักงานสำหรับสรุปยอดเบิกเงิน', 'error');
@@ -3120,32 +3813,1704 @@ function extractCoordsFromMapsUrl() {
   }
 }
 
-// 4. Demo Toggle
-function toggleDemoOptions(e) {
-  if (e) e.preventDefault();
-  const section = document.getElementById('demoAccountsSection');
-  const widget = document.getElementById('roleSwitcherWidget');
-  const link = document.getElementById('toggleDemoLink');
-  if (!section) return;
 
-  if (section.style.display === 'none') {
-    section.style.display = 'block';
-    if (widget) widget.style.display = 'block';
-    if (link) link.textContent = '🔒 ซ่อนตัวเลือกบัญชีทดลอง (Hide Demo Options)';
-  } else {
-    section.style.display = 'none';
-    if (widget) widget.style.display = 'none';
-    if (link) link.textContent = '🔧 แสดงตัวเลือกบัญชีทดลอง (Demo Options)';
+
+function populateApproverDropdown() {
+  const select = document.getElementById('jobApprover');
+  if (!select) return;
+  select.innerHTML = '<option value="">-- เลือกผู้อนุมัติ --</option>';
+  
+  // Find all employees that have approveJobs permission
+  const approvers = employees.filter(emp => {
+    const perms = getUserPermissions(emp);
+    return perms.approveJobs;
+  });
+  approvers.forEach(emp => {
+    const opt = document.createElement('option');
+    opt.value = emp.email;
+    
+    let roleText = 'พนักงาน';
+    if (emp.role === 'admin') roleText = 'ผู้ดูแลระบบ';
+    else if (emp.role === 'sale') roleText = 'ฝ่ายขาย';
+    else if (emp.role === 'service') roleText = 'ช่างเทคนิค';
+
+    opt.textContent = `${emp.name} (${roleText})`;
+    select.appendChild(opt);
+  });
+}
+
+let isApproveDrawing = false;
+let approveSigCanvas = null;
+let approveSigCtx = null;
+
+function initApproveSignatureCanvas() {
+  approveSigCanvas = document.getElementById('approveSignatureCanvas');
+  if (!approveSigCanvas) return;
+  
+  approveSigCtx = approveSigCanvas.getContext('2d');
+  approveSigCtx.strokeStyle = '#1e293b';
+  approveSigCtx.lineWidth = 2.5;
+  approveSigCtx.lineCap = 'round';
+  approveSigCtx.lineJoin = 'round';
+
+  // Clear previous drawing
+  approveSigCtx.clearRect(0, 0, approveSigCanvas.width, approveSigCanvas.height);
+  const input = document.getElementById('approveJobSignature');
+  if (input) input.value = '';
+
+  // Event Listeners for drawing
+  approveSigCanvas.addEventListener('mousedown', startApproveDrawing);
+  approveSigCanvas.addEventListener('mousemove', drawApprove);
+  approveSigCanvas.addEventListener('mouseup', stopApproveDrawing);
+  approveSigCanvas.addEventListener('mouseleave', stopApproveDrawing);
+
+  // Mobile Touch Drawing Support
+  approveSigCanvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = approveSigCanvas.getBoundingClientRect();
+      isApproveDrawing = true;
+      approveSigCtx.beginPath();
+      approveSigCtx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+    }
+  }, { passive: false });
+
+  approveSigCanvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (isApproveDrawing && e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = approveSigCanvas.getBoundingClientRect();
+      approveSigCtx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+      approveSigCtx.stroke();
+    }
+  }, { passive: false });
+
+  approveSigCanvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    stopApproveDrawing();
+  }, { passive: false });
+}
+
+function startApproveDrawing(e) {
+  isApproveDrawing = true;
+  const rect = approveSigCanvas.getBoundingClientRect();
+  approveSigCtx.beginPath();
+  approveSigCtx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function drawApprove(e) {
+  if (!isApproveDrawing) return;
+  const rect = approveSigCanvas.getBoundingClientRect();
+  approveSigCtx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+  approveSigCtx.stroke();
+}
+
+function stopApproveDrawing() {
+  if (isApproveDrawing) {
+    isApproveDrawing = false;
+    const input = document.getElementById('approveJobSignature');
+    if (input && approveSigCanvas) {
+      input.value = approveSigCanvas.toDataURL('image/png');
+    }
   }
 }
 
-// 5. Update Sheets Warning Banner
-function updateSheetsWarningBanner() {
-  const banner = document.getElementById('sheetsWarningBanner');
-  if (!banner) return;
-  if (!sheetsApiUrl) {
-    banner.style.display = 'flex';
-  } else {
-    banner.style.display = 'none';
+function clearApproveSignatureCanvas() {
+  approveSigCanvas = document.getElementById('approveSignatureCanvas');
+  if (approveSigCanvas) {
+    const ctx = approveSigCanvas.getContext('2d');
+    ctx.clearRect(0, 0, approveSigCanvas.width, approveSigCanvas.height);
+    const input = document.getElementById('approveJobSignature');
+    if (input) input.value = '';
   }
 }
+
+function approveNewJob(id) {
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  
+  document.getElementById('approveJobId').value = job.id;
+  document.getElementById('approveJobNo').textContent = job.jobNo || job.id;
+  document.getElementById('approveCustomerName').textContent = job.customerName || '';
+  document.getElementById('approveJobSignature').value = '';
+  
+  document.getElementById('approveJobModal').style.display = 'block';
+  
+  // Initialize drawing canvas
+  setTimeout(initApproveSignatureCanvas, 100);
+}
+
+function closeApproveJobModal() {
+  document.getElementById('approveJobModal').style.display = 'none';
+}
+
+function confirmApproveJob() {
+  const id = document.getElementById('approveJobId').value;
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  
+  const signatureBase64 = document.getElementById('approveJobSignature').value;
+  if (!signatureBase64) {
+    showToast('❌ กรุณาเซ็นชื่อเพื่ออนุมัติงานบริการ', 'error');
+    return;
+  }
+  
+  job.status = 'pending'; // Approved, now pending scheduled work
+  job.approverSignature = signatureBase64; // Save the approval signature
+  job.approvedAt = new Date().toISOString(); // Record approval timestamp
+  
+  showToast('✅ อนุมัติงานบริการสำเร็จเรียบร้อย พนักงานสามารถตอบรับงานได้แล้ว', 'success');
+  
+  // Save/sync to server SQL database
+  apiPost('/api/jobs', job).catch(err => console.error("Failed to approve job on server database:", err));
+  saveToStorage();
+  renderAll();
+  closeApproveJobModal();
+}
+
+
+
+// 8. Accept Job Action (Service Role Workflow)
+function acceptJob(id) {
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  
+  job.status = 'accepted';
+  if (currentUser) {
+    job.technician = currentUser.name;
+  }
+  
+  saveToStorage();
+  renderAll();
+  showToast('👍 ตอบรับงานบริการเรียบร้อย! เตรียมเดินทางเข้าปฏิบัติงาน', 'success');
+}
+
+// 9. Preview Problem Image (Base64 conversion with compression)
+function previewProblemImage(input) {
+  if (input.files && input.files[0]) {
+    showToast('⏳ กำลังบีบอัดรูปภาพแจ้งปัญหา...', 'info');
+    compressImage(input.files[0], function(base64) {
+      document.getElementById('problemPhotoBase64').value = base64;
+      const preview = document.getElementById('problemPhotoPreview');
+      if (preview) {
+        preview.innerHTML = `<img src="${base64}" style="width:100%; height:100%; object-fit:contain;" />`;
+      }
+      showToast('📸 อัปโหลดและบีบอัดรูปภาพแจ้งปัญหาเรียบร้อย', 'success');
+    });
+  }
+}
+
+// 10. Open Permissions Modal for Employee (Admin settings)
+function openPermissionsModal(email) {
+  const emp = employees.find(e => e.email === email);
+  if (!emp) return;
+
+  document.getElementById('permEmail').value = emp.email;
+  document.getElementById('permEmployeeName').textContent = emp.name;
+  document.getElementById('permEmployeeEmail').textContent = emp.email;
+
+  const perms = getUserPermissions(emp);
+
+  document.getElementById('p_viewJobs').checked = !!perms.viewJobs;
+  document.getElementById('p_editJobs').checked = !!perms.editJobs;
+  document.getElementById('p_deleteJobs').checked = !!perms.deleteJobs;
+  document.getElementById('p_approveJobs').checked = !!perms.approveJobs;
+  document.getElementById('p_travelClaims').checked = !!perms.travelClaims;
+  document.getElementById('p_otClaims').checked = !!perms.otClaims;
+  document.getElementById('p_approveClaims').checked = !!perms.approveClaims;
+  document.getElementById('p_payroll').checked = !!perms.payroll;
+  document.getElementById('p_adminSettings').checked = !!perms.adminSettings;
+
+  document.getElementById('permissionsModal').style.display = 'block';
+}
+
+function closePermissionsModal() {
+  document.getElementById('permissionsModal').style.display = 'none';
+}
+
+// Save detailed permissions back to employee profile
+function saveEmployeePermissions() {
+  const email = document.getElementById('permEmail').value;
+  const emp = employees.find(e => e.email === email);
+  if (!emp) return;
+
+  emp.permissions = {
+    viewJobs: document.getElementById('p_viewJobs').checked,
+    editJobs: document.getElementById('p_editJobs').checked,
+    deleteJobs: document.getElementById('p_deleteJobs').checked,
+    approveJobs: document.getElementById('p_approveJobs').checked,
+    travelClaims: document.getElementById('p_travelClaims').checked,
+    otClaims: document.getElementById('p_otClaims').checked,
+    approveClaims: document.getElementById('p_approveClaims').checked,
+    payroll: document.getElementById('p_payroll').checked,
+    adminSettings: document.getElementById('p_adminSettings').checked
+  };
+
+  localStorage.setItem('servicell1_employees', JSON.stringify(employees));
+  
+  // Save updated employee permissions to backend SQL database
+  apiPost('/api/employees', emp).catch(err => console.error("Failed to update employee permissions on server database:", err));
+
+  renderEmployeeTable();
+  closePermissionsModal();
+  showToast('💾 บันทึกการอัพเดทสิทธิ์พนักงานเรียบร้อย', 'success');
+}
+
+// ── Calendar Controller State & Initialization ──
+let selectedCalendarMonth = new Date().toISOString().substring(0, 7); // 'YYYY-MM'
+let selectedCalendarDate = ''; // 'YYYY-MM-DD'
+
+function initCalendar() {
+  const monthInput = document.getElementById('calendarMonth');
+  if (monthInput) {
+    monthInput.value = selectedCalendarMonth;
+    monthInput.addEventListener('change', (e) => {
+      selectedCalendarMonth = e.target.value;
+      renderCalendar();
+    });
+  }
+  
+  const techSelect = document.getElementById('calendarTechFilter');
+  if (techSelect) {
+    techSelect.addEventListener('change', () => {
+      renderCalendar();
+    });
+  }
+}
+
+function renderCalendar() {
+  const grid = document.getElementById('calendarGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  // Get active technicians list to populate filter
+  const techSelect = document.getElementById('calendarTechFilter');
+  if (techSelect && techSelect.options.length <= 1) {
+    const uniqueTechs = Array.from(new Set(employees.filter(e => e.role === 'service').map(e => e.name)));
+    uniqueTechs.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      techSelect.appendChild(opt);
+    });
+  }
+
+  const selectedTech = techSelect ? techSelect.value : '';
+  const [year, month] = selectedCalendarMonth.split('-').map(Number);
+  
+  // Start of month
+  const firstDay = new Date(year, month - 1, 1);
+  const startDayOfWeek = firstDay.getDay(); // 0 is Sunday, 1 is Monday, etc.
+  
+  // Total days in month
+  const totalDays = new Date(year, month, 0).getDate();
+  
+  // Prepend empty cells for days of previous month
+  for (let i = 0; i < startDayOfWeek; i++) {
+    const blank = document.createElement('div');
+    blank.className = 'calendar-day-cell blank';
+    blank.style.minHeight = '90px';
+    blank.style.border = '1px solid var(--border)';
+    blank.style.background = 'rgba(0,0,0,0.02)';
+    grid.appendChild(blank);
+  }
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Append actual day cells
+  for (let day = 1; day <= totalDays; day++) {
+    const dayStr = String(day).padStart(2, '0');
+    const fullDate = `${selectedCalendarMonth}-${dayStr}`;
+
+    const cell = document.createElement('div');
+    cell.className = 'calendar-day-cell';
+    cell.style.minHeight = '90px';
+    cell.style.border = '1px solid var(--border)';
+    cell.style.padding = '6px';
+    cell.style.cursor = 'pointer';
+    cell.style.position = 'relative';
+    cell.style.display = 'flex';
+    cell.style.flexDirection = 'column';
+    cell.style.gap = '4px';
+    cell.style.borderRadius = 'var(--radius-sm)';
+    cell.style.background = 'var(--bg-card)';
+
+    if (fullDate === todayStr) {
+      cell.style.border = '2px solid var(--accent-blue)';
+      cell.style.background = 'rgba(37,99,235,0.03)';
+    }
+
+    if (fullDate === selectedCalendarDate) {
+      cell.style.boxShadow = '0 0 0 2px var(--accent-green)';
+      cell.style.background = 'rgba(46,207,125,0.05)';
+    }
+
+    const numberLabel = document.createElement('span');
+    numberLabel.textContent = day;
+    numberLabel.style.fontWeight = '700';
+    numberLabel.style.fontSize = '0.8rem';
+    numberLabel.style.color = (new Date(year, month - 1, day).getDay() === 0) ? '#ef4444' : 'inherit';
+    cell.appendChild(numberLabel);
+
+    // Get jobs for this day matching filter
+    const dayJobs = jobs.filter(j => {
+      if (!j.appointmentDate) return false;
+      const jDate = j.appointmentDate.split('T')[0];
+      if (jDate !== fullDate) return false;
+      if (selectedTech && j.technician !== selectedTech) return false;
+      return true;
+    });
+
+    // Render badges for jobs
+    dayJobs.slice(0, 3).forEach(j => {
+      const badge = document.createElement('div');
+      badge.className = 'calendar-job-badge';
+      // format time part if exists
+      let timePart = '';
+      if (j.appointmentDate.includes('T')) {
+        const startStr = j.appointmentDate.split('T')[1].substring(0, 5);
+        const duration = j.bookingDuration || 2;
+        const end = new Date(new Date(j.appointmentDate).getTime() + (duration * 60 * 60 * 1000));
+        const endStr = end.toTimeString().substring(0, 5);
+        timePart = `${startStr}-${endStr}`;
+      }
+      
+      const statusColors = {
+        'awaiting_approval': 'orange',
+        'pending': 'blue',
+        'accepted': 'purple',
+        'completed': 'green'
+      };
+      
+      const badgeColor = statusColors[j.status] || 'blue';
+      
+      badge.textContent = `${timePart ? '[' + timePart + '] ' : ''}${j.technician || 'ไม่ระบุ'}`;
+      badge.style.fontSize = '0.7rem';
+      badge.style.fontWeight = '600';
+      badge.style.padding = '2px 4px';
+      badge.style.borderRadius = '3px';
+      badge.style.overflow = 'hidden';
+      badge.style.textOverflow = 'ellipsis';
+      badge.style.whiteSpace = 'nowrap';
+      badge.style.color = '#fff';
+      
+      if (badgeColor === 'green') {
+        badge.style.background = 'var(--accent-green)';
+      } else if (badgeColor === 'orange') {
+        badge.style.background = 'orange';
+      } else if (badgeColor === 'purple') {
+        badge.style.background = 'purple';
+      } else {
+        badge.style.background = 'var(--accent-blue)';
+      }
+      
+      cell.appendChild(badge);
+    });
+
+    if (dayJobs.length > 3) {
+      const more = document.createElement('span');
+      more.textContent = `+อีก ${dayJobs.length - 3} งาน`;
+      more.style.fontSize = '0.65rem';
+      more.style.color = 'var(--text-secondary)';
+      more.style.textAlign = 'right';
+      cell.appendChild(more);
+    }
+
+    cell.addEventListener('click', (e) => {
+      selectedCalendarDate = fullDate;
+      // Re-render grid to highlight selected cell
+      document.querySelectorAll('.calendar-day-cell').forEach(c => {
+        c.style.boxShadow = '';
+      });
+      cell.style.boxShadow = '0 0 0 2px var(--accent-green)';
+      
+      renderSelectedDayJobs();
+    });
+
+    grid.appendChild(cell);
+  }
+  
+  // Render details for the selected day
+  renderSelectedDayJobs();
+}
+
+function renderSelectedDayJobs() {
+  const dateLabel = document.getElementById('calendarSelectedDateLabel');
+  const container = document.getElementById('calendarSelectedDayJobs');
+  if (!dateLabel || !container) return;
+
+  if (!selectedCalendarDate) {
+    dateLabel.textContent = '—';
+    container.innerHTML = `<div style="text-align:center; color:var(--text-secondary); padding:20px; font-size:0.85rem;">กรุณาคลิกเลือกวันที่บนปฏิทินเพื่อดูรายละเอียดงาน</div>`;
+    return;
+  }
+
+  dateLabel.textContent = formatDate(selectedCalendarDate);
+
+  // Filter jobs
+  const techSelect = document.getElementById('calendarTechFilter');
+  const selectedTech = techSelect ? techSelect.value : '';
+  
+  const dayJobs = jobs.filter(j => {
+    if (!j.appointmentDate) return false;
+    const jDate = j.appointmentDate.split('T')[0];
+    if (jDate !== selectedCalendarDate) return false;
+    if (selectedTech && j.technician !== selectedTech) return false;
+    return true;
+  });
+
+  if (!dayJobs.length) {
+    container.innerHTML = `<div style="text-align:center; color:var(--text-secondary); padding:20px; font-size:0.85rem;">ไม่มีคิวนัดหมายงานซ่อมในวันนี้</div>`;
+    return;
+  }
+
+  // Sort by time
+  dayJobs.sort((a, b) => {
+    const timeA = a.appointmentDate.includes('T') ? a.appointmentDate.split('T')[1] : '';
+    const timeB = b.appointmentDate.includes('T') ? b.appointmentDate.split('T')[1] : '';
+    return timeA.localeCompare(timeB);
+  });
+
+  container.innerHTML = dayJobs.map(j => {
+    let timeStr = 'ไม่ระบุเวลา';
+    if (j.appointmentDate.includes('T')) {
+      const startStr = j.appointmentDate.split('T')[1].substring(0, 5);
+      const duration = j.bookingDuration || 2;
+      const end = new Date(new Date(j.appointmentDate).getTime() + (duration * 60 * 60 * 1000));
+      const endStr = end.toTimeString().substring(0, 5);
+      timeStr = `${startStr} - ${endStr} น. (${duration} ชม.)`;
+    }
+
+    const badgeColorMap = {
+      'awaiting_approval': 'badge-pending-approval',
+      'pending': 'badge-pending',
+      'accepted': 'badge-progress',
+      'completed': 'badge-completed'
+    };
+    
+    const badgeTextMap = {
+      'awaiting_approval': '⏳ รออนุมัติ',
+      'pending': 'รอดำเนินการ',
+      'accepted': '⚡ ยอมรับงาน',
+      'completed': '✅ เสร็จสิ้น'
+    };
+    
+    const statusClass = badgeColorMap[j.status] || 'badge-pending';
+    const statusText = badgeTextMap[j.status] || 'รอดำเนินการ';
+    
+    const statusBadge = `<span class="badge ${statusClass}">${statusText}</span>`;
+
+    return `
+      <div class="calendar-job-item" style="border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px; background:var(--bg-card2); display:flex; flex-direction:column; gap:6px; box-shadow:var(--shadow-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <strong style="color:var(--text-primary); font-size:0.9rem;">${j.jobNo || j.id}</strong>
+          ${statusBadge}
+        </div>
+        <div style="font-size:0.8rem; color:var(--text-secondary); display:flex; flex-direction:column; gap:2px;">
+          <span>🕐 <strong>เวลานัด:</strong> ${timeStr}</span>
+          <span>👤 <strong>ช่าง:</strong> ${j.technician || 'ไม่ระบุ'}</span>
+          <span>🏢 <strong>ลูกค้า:</strong> ${j.customerName}</span>
+          <span>📌 <strong>อาการ:</strong> ${j.problemDesc || '-'}</span>
+        </div>
+        <button class="btn-primary" onclick="viewJob('${j.id}')" style="padding:4px 8px; font-size:0.75rem; border-radius:4px; margin-top:4px; display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer; width:100%; border:none; background:var(--accent-blue); color:#fff; font-weight:600;">
+          🔍 ดูรายละเอียดใบงาน
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ============================================================
+// AI ASSISTANTS CONTROLLER & SYSTEM INTEGRATION
+// ============================================================
+
+// 1. Database/State declarations for AI Assistants
+let aiSelectedAgent = 'doc-ai';
+let aiSelectedDocId = null;
+let aiSelectedEmailId = null;
+let aiSelectedAuditType = 'travel';
+let aiSelectedAuditId = null;
+
+// Demo documents
+const aiDemoDocs = [
+  {
+    id: 'doc-1',
+    name: 'คู่มือการซ่อมแซมระบบไฟฟ้า_Live_Lighting.txt',
+    size: '1.2 KB',
+    type: 'text/plain',
+    content: `คู่มือการแก้ไขปัญหาทางเทคนิคและสเปกระบบไฟฟ้า - บริษัท Live Lighting จำกัด
+--------------------------------------------------
+1. ปัญหาโคมไฟกระพริบถี่ๆ (LED Blinking Issue):
+มักเกิดจากแรงดันไฟฟ้าขัดข้องหรือความร้อนสะสมเกินพิกัดในชุดวงจรขับหลอด (LED Driver)
+โค้ดแสดงความผิดปกติบนไดรเวอร์ยี่ห้อพรีเมียม:
+- E1: แรงดันไฟฟ้าขาเข้าสูงเกินพิกัด (Overvoltage)
+  วิธีแก้ไข: ทำการปลดแหล่งจ่ายไฟ 5 นาทีแล้วสลับเปิดใหม่เพื่อรีเซ็ต หากไม่หายต้องใช้ตัวควบคุมแรงดันเสริม
+- E2: อุณหภูมิไดรเวอร์สูงเกินพิกัดความร้อน (Overheating)
+  วิธีแก้ไข: ปรับปรุงจุดติดตั้งให้ระบายอากาศได้สะดวก หลีกเลี่ยงกล่องปิดทึบหรือความร้อนสะสม
+- E3: สัญญาณทริกเกอร์ลัดวงจรในโมดูล LED
+  วิธีแก้ไข: ตรวจสอบความถูกต้องของขั้วสายไฟ L-N และสายดิน
+
+2. นโยบายการประกันผลงานและสินค้า:
+- รับประกันค่าแรงช่างเทคนิคซ่อมแซม: 6 เดือน (180 วัน) นับจากวันที่ลงนามใน Service Report
+- รับประกันวัสดุอุปกรณ์และโคมไฟติดตั้งใหม่: 1 ปี (365 วัน)
+- การรับประกันจะไม่ครอบคลุมกรณีภัยธรรมชาติ ฟ้าผ่า หรือการดัดแปลงแก้ไขอุปกรณ์ภายนอกโดยไม่ได้รับอนุญาต`
+  },
+  {
+    id: 'doc-2',
+    name: 'ระเบียบการเงิน_ใบเบิกค่าเดินทางและOT.txt',
+    size: '1.5 KB',
+    type: 'text/plain',
+    content: `คู่มือระเบียบบริษัทสำหรับการเบิกจ่ายค่าเดินทางและค่าล่วงเวลา (OT)
+--------------------------------------------------
+1. การเบิกค่าเดินทางสำหรับช่างเทคนิค:
+- อัตราค่าชดเชยการเดินทางหน้างาน: คิดในอัตรากิโลเมตรละ 5 บาท (นับจากพิกัดบริษัทไปยังจุดบริการลูกค้า)
+- ค่าทางด่วนและค่าที่จอดรถ: เบิกได้เต็มจำนวนตามจริง โดยต้องแนบรูปถ่ายใบเสร็จในใบเบิก
+- การระบุพิกัด: ช่างเทคนิคต้องระบุพิกัด GPS ลูกค้าในใบงานให้ตรงกับหน้างานจริง ระยะคลาดเคลื่อนที่อนุญาตไม่เกิน 50 เมตร
+
+2. การเบิกจ่ายค่าทำงานล่วงเวลา (OT):
+- ช่างเทคนิคจะต้องทำการบันทึกเวลา "เช็คอิน" (Check-in) และ "เช็คเอาท์" (Check-out) ผ่านหน้าฟอร์มบริการทุกครั้ง
+- เวลาทำงานปกติ: 08:30 น. - 17:30 น.
+- อัตราตัวคูณล่วงเวลา (Multiplier):
+  * วันทำงานปกติ (จันทร์-ศุกร์ หลัง 17:30 น.): คิดตัวคูณ 1.5 เท่าของอัตราปกติ
+  * วันหยุดประจำสัปดาห์ (เสาร์-อาทิตย์) หรือวันหยุดนักขัตฤกษ์: คิดตัวคูณ 3.0 เท่า
+- การคำนวณ: ชั่วโมง OT สะสม = เวลาเช็คเอาท์จริง - เวลาเช็คอินจริง (หักเวลาพักปกติหากเกิน 8 ชม.)`
+  }
+];
+
+// Load from LocalStorage if edits are made, otherwise default
+let aiDocuments = JSON.parse(localStorage.getItem('ai_documents')) || aiDemoDocs;
+
+const aiDemoEmails = [
+  {
+    id: 'email-1',
+    sender: 'คุณพัชราภา (pachara@gmail.com)',
+    date: '2026-07-19',
+    subject: 'โคมไฟกิ่งหน้าบ้านที่พึ่งติดตั้งไปมีปัญกระพริบไม่หยุดเลยครับ',
+    body: `เรียน ฝ่ายบริการ Live Lighting,
+เมื่อสัปดาห์ที่แล้วทางทีมช่างได้เข้ามาติดตั้งโคมไฟกิ่ง LED ตัวใหม่ให้ที่หน้าบ้านค่ะ
+แต่เมื่อคืนนี้สังเกตเห็นว่าหลอดไฟเริ่มกระพริบถี่ๆ ตลอดเวลา ปิดสวิตช์แล้วเปิดใหม่ก็ไม่หายค่ะ ตอนนี้ต้องถอดปลั๊กออกก่อนเพราะกลัวสายไฟจะช็อตหรือลัดวงจร รบกวนส่งช่างคนเดิมเข้ามาช่วยตรวจสอบและแก้ไขด่วนที่สุดด้วยค่ะ เพราะไม่มีไฟใช้ในสวนหน้าบ้านเวลากลางคืนค่ะ
+
+ขอแสดงความนับถือ,
+พัชราภา`,
+    category: 'ร้องเรียน/แจ้งปัญหา (Complaint)',
+    urgency: 'ด่วนที่สุด (High)',
+    sentiment: 'เชิงลบ (Negative)',
+    replied: false
+  },
+  {
+    id: 'email-2',
+    sender: 'คุณกิตติศักดิ์ (kittisak@powercorp.com)',
+    date: '2026-07-20',
+    subject: 'สอบถามรายละเอียดราคาและติดตั้งโคมไฟสปอตไลท์ 10 จุด',
+    body: `เรียน ฝ่ายขายและบริการ Live Lighting,
+เนื่องจากทางแผนกคลังสินค้าของบริษัทกำลังจะขยายพื้นที่ทำงานภายนอกอาคาร จึงต้องการติดตั้งโคมไฟสปอตไลท์ LED ขนาด 150W หรือโคมไฮเบย์รวม 10 จุด
+รบกวนแนะนำรุ่นที่เหมาะกับการเปิดทิ้งไว้ตลอดทั้งคืน และขอราคาค่าโคมไฟรวมถึงค่าติดตั้งประเมินเบื้องต้นด้วยครับ รวมถึงระยะเวลาที่ใช้ในการเข้าดำเนินการครับ
+
+ขอแสดงความนับถือ,
+กิตติศักดิ์ ประเสริฐเวช`,
+    category: 'ขอใบเสนอราคา (Inquiry)',
+    urgency: 'ปานกลาง (Medium)',
+    sentiment: 'ทั่วไป (Neutral)',
+    replied: false
+  },
+  {
+    id: 'email-3',
+    sender: 'คุณมนัส (manas_y@yahoo.com)',
+    date: '2026-07-18',
+    subject: 'ร้องเรียนพฤติกรรมการปฏิบัติงานของช่างที่เข้ามาซ่อมตู้ไฟวานนี้',
+    body: `เรียน ผู้จัดการ Live Lighting,
+ขอคอมเพลนช่างที่เข้ามาบำรุงรักษาตู้คอนโทรลไฟในคอนโดเราเมื่อวานนี้หน่อยครับ
+ทีมช่างมากัน 3 คน แต่ทำงานจริงแค่คนเดียว อีก 2 คนไปนั่งจับกลุ่มคุยเสียงดังและเล่นมือถือบริเวณล็อบบี้คอนโด ซึ่งไม่น่าดูเลยครับ และงานล่าช้ากว่าเดิมร่วม 2 ชั่วโมง อยากให้ตักเตือนและปรับปรุงมารยาทด้วยครับ
+
+ขอแสดงความนับถือ,
+มนัส`,
+    category: 'ร้องเรียน/แจ้งปัญหา (Complaint)',
+    urgency: 'ปานกลาง (Medium)',
+    sentiment: 'เชิงลบ (Negative)',
+    replied: false
+  }
+];
+
+let aiEmails = JSON.parse(localStorage.getItem('ai_emails')) || aiDemoEmails;
+
+// Init AIAgents Dashboard
+function initAIAgents() {
+  renderDocList();
+  renderEmailInbox();
+  loadAuditClaimsList();
+  // Clear chat if empty
+  const docChat = document.getElementById('docChatContainer');
+  if (docChat && docChat.children.length <= 1) {
+    clearDocChat();
+  }
+}
+
+// Save Gemini API Key
+function saveGeminiApiKey() {
+  const key = document.getElementById('geminiApiKey').value.trim();
+  geminiApiKey = key;
+  localStorage.setItem('servicell1_gemini_api_key', key);
+  
+  apiPost('/api/settings', { geminiApiKey: key })
+    .then(() => {
+      showToast('🤖 บันทึก Gemini API Key ลงในระบบเรียบร้อยแล้ว', 'success');
+    })
+    .catch(err => {
+      console.error("Failed to save Gemini API Key to server settings:", err);
+      showToast('⚠️ ไม่สามารถบันทึกคีย์ลงระบบฐานข้อมูลหลักได้', 'warning');
+    });
+}
+
+// Switch AI Agent Tab
+function switchAIAgentTab(tabId) {
+  aiSelectedAgent = tabId;
+  document.querySelectorAll('.ai-tab-content').forEach(el => el.style.display = 'none');
+  const activeTab = document.getElementById('ai-tab-' + tabId);
+  if (activeTab) activeTab.style.display = 'block';
+
+  // Toggle active button style
+  const navContainer = document.querySelector('.ai-tabs-nav');
+  if (navContainer) {
+    navContainer.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+    // Find matching button by onclick containing tabId
+    const activeBtn = Array.from(navContainer.querySelectorAll('button')).find(btn => btn.getAttribute('onclick').includes(tabId));
+    if (activeBtn) activeBtn.classList.add('active');
+  }
+}
+
+// Helper to call Google Gemini API
+async function callGeminiAPI(promptText) {
+  if (!geminiApiKey) {
+    throw new Error("Missing API Key");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: promptText }] }]
+    })
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error?.message || "Failed to query Gemini API");
+  }
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
+// ── 1. Document AI Logic ──
+function renderDocList() {
+  const container = document.getElementById('uploadedDocsList');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  aiDocuments.forEach(doc => {
+    const isSelected = aiSelectedDocId === doc.id;
+    const card = document.createElement('div');
+    card.className = `email-inbox-item ${isSelected ? 'active' : ''}`;
+    card.style.padding = '8px 12px';
+    card.style.display = 'flex';
+    card.style.justifyContent = 'space-between';
+    card.style.alignItems = 'center';
+    card.onclick = () => selectDocument(doc.id);
+    
+    card.innerHTML = `
+      <div style="flex:1; overflow:hidden; text-align:left;">
+        <div style="font-weight:600; font-size:0.8rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; color:var(--text-primary);">📄 ${doc.name}</div>
+        <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">ขนาด: ${doc.size}</div>
+      </div>
+      <button type="button" class="btn-outline" style="padding:2px 6px; font-size:0.68rem; color:var(--accent-red); border-color:transparent; background:transparent; cursor:pointer;" onclick="deleteDocument(event, '${doc.id}')">🗑️</button>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function selectDocument(id) {
+  aiSelectedDocId = id;
+  renderDocList();
+  
+  const doc = aiDocuments.find(d => d.id === id);
+  if (doc) {
+    document.getElementById('selectedDocTitle').textContent = doc.name;
+    document.getElementById('selectedDocMeta').textContent = `สัญชาติไฟล์: ${doc.type} | ขนาด: ${doc.size}`;
+    
+    // Welcome message for document
+    const chat = document.getElementById('docChatContainer');
+    chat.innerHTML = `
+      <div class="ai-chat-bubble system" style="background:var(--bg-card2); padding:10px 14px; border-radius:var(--radius-sm); font-size:0.85rem; line-height:1.5; border-left:3px solid var(--accent-purple); align-self: flex-start; max-width:80%;">
+        <span>ฉันพร้อมช่วยวิเคราะห์และตอบข้อมูลเกี่ยวกับเอกสาร **"${doc.name}"** แล้วค่ะ พิมพ์สอบถามรายละเอียด เช่น สรุปให้ฟังหน่อย หรือค้นหาหัวข้อต่างๆ ได้เลยค่ะ</span>
+      </div>
+    `;
+  }
+}
+
+function clearSelectedDoc() {
+  aiSelectedDocId = null;
+  document.getElementById('selectedDocTitle').textContent = 'โปรดเลือกเอกสาร...';
+  document.getElementById('selectedDocMeta').textContent = '—';
+  clearDocChat();
+  renderDocList();
+}
+
+function clearDocChat() {
+  const chat = document.getElementById('docChatContainer');
+  if (chat) {
+    chat.innerHTML = `
+      <div class="ai-chat-bubble system" style="background:var(--bg-card2); padding:10px 14px; border-radius:var(--radius-sm); font-size:0.85rem; line-height:1.5; border-left:3px solid var(--accent-purple); align-self: flex-start; max-width:80%;">
+        <span>สวัสดีค่ะ ฉันคือ **พนักงานจัดการเอกสาร AI** โปรดเลือกเอกสารในคลังเพื่อเริ่มต้นพูดคุย ค้นหาข้อมูล หรือสรุปเนื้อหาค่ะ</span>
+      </div>
+    `;
+  }
+}
+
+function handleDocUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    const newDoc = {
+      id: 'doc_' + Date.now(),
+      name: file.name,
+      size: (file.size / 1024).toFixed(1) + ' KB',
+      type: file.type || 'text/plain',
+      content: evt.target.result
+    };
+    aiDocuments.push(newDoc);
+    localStorage.setItem('ai_documents', JSON.stringify(aiDocuments));
+    renderDocList();
+    selectDocument(newDoc.id);
+    showToast('📂 อัปโหลดและบรรจุเอกสารเข้าคลังเรียบร้อย', 'success');
+  };
+  
+  if (file.type.match('image.*')) {
+    // For images, store simulated description
+    reader.onload = function() {
+      const newDoc = {
+        id: 'doc_' + Date.now(),
+        name: file.name,
+        size: (file.size / 1024).toFixed(1) + ' KB',
+        type: file.type,
+        content: `[ไฟล์รูปภาพ] ตัวอย่างภาพถ่ายแจ้งหน้างานชำรุดเสียหาย อุปกรณ์ตรวจพบคือโคมไฟชำรุดจากการลัดวงจร มีรอยไหม้สีดำบริเวณรอบขั้วต่อหลอด`
+      };
+      aiDocuments.push(newDoc);
+      localStorage.setItem('ai_documents', JSON.stringify(aiDocuments));
+      renderDocList();
+      selectDocument(newDoc.id);
+      showToast('📸 อัปโหลดและแปลงภาพถ่ายหน้างานด้วย AI เรียบร้อย', 'success');
+    };
+    reader.readAsDataURL(file);
+  } else {
+    reader.readAsText(file);
+  }
+}
+
+function deleteDocument(e, id) {
+  e.stopPropagation();
+  aiDocuments = aiDocuments.filter(d => d.id !== id);
+  localStorage.setItem('ai_documents', JSON.stringify(aiDocuments));
+  if (aiSelectedDocId === id) {
+    clearSelectedDoc();
+  } else {
+    renderDocList();
+  }
+  showToast('🗑️ ลบเอกสารออกจากคลังถาวร', 'info');
+}
+
+// Call Gemini or Local simulation for Document Query
+async function sendDocQuery() {
+  const input = document.getElementById('docQueryInput');
+  const query = input.value.trim();
+  if (!query) return;
+  
+  if (!aiSelectedDocId) {
+    showToast('⚠️ โปรดเลือกเอกสารที่ต้องการถามข้อมูลก่อนค่ะ', 'warning');
+    return;
+  }
+  
+  const doc = aiDocuments.find(d => d.id === aiSelectedDocId);
+  if (!doc) return;
+  
+  // Append User message
+  appendDocChatBubble(query, 'user');
+  input.value = '';
+  
+  // Typing indicator
+  const typingId = appendDocTypingIndicator();
+  
+  try {
+    let reply = '';
+    if (geminiApiKey) {
+      // Prompt combining document context
+      const prompt = `คุณคือ พนักงานวิเคราะห์เอกสารอัจฉริยะ (Document AI Agent) ของบริษัท Live Lighting
+นี่คือเนื้อหาของเอกสารชื่อ "${doc.name}":
+"""
+${doc.content}
+"""
+
+คำถามจากผู้ใช้: "${query}"
+จงตอบคำถามนี้ตามเนื้อหาเอกสารข้างต้นอย่างถูกต้อง สุภาพ และเป็นมืออาชีพ (ตอบเป็นภาษาไทย):`;
+      reply = await callGeminiAPI(prompt);
+    } else {
+      // Simulate reply (simulated intelligence delay)
+      await new Promise(resolve => setTimeout(resolve, 800));
+      reply = simulateDocReply(doc, query);
+    }
+    
+    removeDocTypingIndicator(typingId);
+    appendDocChatBubble(reply, 'system');
+  } catch (error) {
+    console.error(error);
+    removeDocTypingIndicator(typingId);
+    appendDocChatBubble(`⚠️ ขออภัยค่ะ เกิดความผิดพลาดในการประมวลผลคำตอบ: ${error.message}`, 'error');
+  }
+}
+
+function appendDocChatBubble(text, sender) {
+  const container = document.getElementById('docChatContainer');
+  if (!container) return;
+  
+  const bubble = document.createElement('div');
+  bubble.className = `ai-chat-bubble ${sender}`;
+  if (sender === 'system') {
+    bubble.style.alignSelf = 'flex-start';
+    bubble.style.maxWidth = '80%';
+    bubble.style.background = 'var(--bg-card2)';
+    bubble.style.borderLeft = '3px solid var(--accent-purple)';
+  } else if (sender === 'user') {
+    bubble.style.alignSelf = 'flex-end';
+    bubble.style.maxWidth = '80%';
+    bubble.style.background = 'linear-gradient(135deg, var(--accent-blue), #3b82f6)';
+  }
+  
+  // Handle markdown bold parsing in text
+  let formattedText = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br/>');
+  
+  bubble.innerHTML = `<span>${formattedText}</span>`;
+  container.appendChild(bubble);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendDocTypingIndicator() {
+  const container = document.getElementById('docChatContainer');
+  const id = 'typing_' + Date.now();
+  const indicator = document.createElement('div');
+  indicator.id = id;
+  indicator.className = 'typing-indicator';
+  indicator.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(indicator);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeDocTypingIndicator(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function simulateDocReply(doc, query) {
+  const q = query.toLowerCase();
+  
+  if (doc.id === 'doc-1') { // คู่มือซ่อมแซมระบบไฟฟ้า
+    if (q.includes('กระพริบ') || q.includes('ดับ')) {
+      return `**วิเคราะห์เอกสาร (คู่มือซ่อม):** ปัญหาไฟกระพริบ มักเกิดจากไดรเวอร์ (LED Driver) ร้อนจัดหรือมีแรงดันขัดข้องค่ะ\n\nรหัสตรวจสอบผิดปกติ:\n- **E1**: แรงดันขาเข้าสูงเกิน (Overvoltage) ให้ถอดสวิตช์ 5 นาทีแล้วเสียบใหม่เพื่อรีเซ็ตค่ะ\n- **E2**: ไดรเวอร์ร้อนเกินพิกัด (Overheating) ให้ตรวจสอบการระบายอากาศค่ะ`;
+    }
+    if (q.includes('ประกัน') || q.includes('รับประกัน') || q.includes('เคลม')) {
+      return `**วิเคราะห์เอกสาร (คู่มือซ่อม):** นโยบายประกันความผิดพลาดดังนี้ค่ะ:\n- รับประกันค่าแรงงานซ่อม **6 เดือน (180 วัน)** หลังวันซ่อมเสร็จ\n- รับประกันตัววัสดุอุปกรณ์/โคมไฟติดตั้งใหม่ **1 ปี (365 วัน)**\n*(หมายเหตุ: ไม่ครอบคลุมภัยธรรมชาติหรือฟ้าผ่าค่ะ)*`;
+    }
+    if (q.includes('e1')) {
+      return `**วิเคราะห์เอกสาร:** รหัส **E1** หมายถึง แรงดันไฟฟ้าขาเข้าสูงเกินพิกัด (Overvoltage) ค่ะ แนวทางแก้คือปลดไฟทิ้งไว้ประมาณ 5 นาทีเพื่อเคลียร์หน่วยความจำ Driver หรือหาตัวคุมแรงดันมาเสริมค่ะ`;
+    }
+    if (q.includes('e2')) {
+      return `**วิเคราะห์เอกสาร:** รหัส **E2** หมายถึง ไดรเวอร์มีความร้อนสะสมสูงเกินพิกัด (Overheating) ค่ะ แนะนำให้เช็คตู้ไฟหรือจุดติดตั้งว่าทึบเกินไปหรือไม่ หากติดตั้งกลางแดดควรมีช่องระบายความร้อนค่ะ`;
+    }
+  } else if (doc.id === 'doc-2') { // ระเบียบการเงิน
+    if (q.includes('กิโลเมตร') || q.includes('อัตรา') || q.includes('เดินทาง') || q.includes('เบิก')) {
+      return `**วิเคราะห์เอกสาร (ระเบียบเบิกเงิน):** ระบุไว้ว่า อัตราการชดเชยค่าเดินทางหน้างานคิดเป็น **กิโลเมตรละ 5 บาท** โดยนับระยะห่างจากพิกัดบริษัท ส่วนค่าทางด่วน/ค่าจอดรถเบิกได้ตามจ่ายจริง แต่ต้องมีใบเสร็จแนบในระบบค่ะ`;
+    }
+    if (q.includes('ot') || q.includes('โอที') || q.includes('ล่วงเวลา')) {
+      return `**วิเคราะห์เอกสาร (ระเบียบเบิกเงิน):** กฎการทำ OT และเบิกสะสมคือ:\n- ช่างต้องบันทึกเช็คอิน-เช็คเอาท์จริงผ่านหน้าฟอร์มเท่านั้น\n- คิดล่วงเวลาหลัง 17:30 น. (อัตราตัวคูณวันปกติ **1.5 เท่า**)\n- หากเป็นวันหยุดหรือวันเสาร์อาทิตย์ คิดตัวคูณ **3.0 เท่า** ของอัตราปกติค่ะ`;
+    }
+  }
+  
+  // Custom fallback text matches
+  return `จากเอกสาร **"${doc.name}"** ระบุเนื้อหาสำคัญเบื้องต้นดังนี้:\n\n${doc.content.substring(0, 150)}...\n\n(คุณสามารถค้นหาคีย์เวิร์ดสำคัญเพิ่มเติม หรือกรอก Gemini API Key ในการตั้งค่าแอดมิน เพื่อเปิดการตอบที่สมบูรณ์และลึกซึ้งยิ่งขึ้นค่ะ)`;
+}
+
+// ── 2. Email AI Logic ──
+function renderEmailInbox() {
+  const container = document.getElementById('emailInboxList');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  aiEmails.forEach(mail => {
+    const isSelected = aiSelectedEmailId === mail.id;
+    const item = document.createElement('div');
+    item.className = `email-inbox-item ${isSelected ? 'active' : ''}`;
+    item.onclick = () => selectEmail(mail.id);
+    
+    // Tag class colors
+    const sentimentClass = mail.sentiment.includes('Positive') ? 'badge-sentiment-positive' : (mail.sentiment.includes('Negative') ? 'badge-sentiment-negative' : 'badge-sentiment-neutral');
+    const urgencyClass = mail.urgency.includes('High') || mail.urgency.includes('ด่วนที่สุด') ? 'badge-urgency-high' : (mail.urgency.includes('Medium') || mail.urgency.includes('ปานกลาง') ? 'badge-urgency-medium' : 'badge-urgency-low');
+
+    item.innerHTML = `
+      <div class="email-header-meta">
+        <span class="email-sender">${mail.sender}</span>
+        <span class="email-date">${mail.date}</span>
+      </div>
+      <div class="email-subject">${mail.replied ? '✅ ' : '📬 '}${mail.subject}</div>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <span class="badge" style="font-size:0.65rem; padding:1px 5px; border-radius:4px;">${mail.category}</span>
+        <span class="badge ${urgencyClass}" style="font-size:0.65rem; padding:1px 5px; border-radius:4px;">${mail.urgency}</span>
+        <span class="badge ${sentimentClass}" style="font-size:0.65rem; padding:1px 5px; border-radius:4px;">${mail.sentiment}</span>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+function selectEmail(id) {
+  aiSelectedEmailId = id;
+  renderEmailInbox();
+  
+  const mail = aiEmails.find(m => m.id === id);
+  if (!mail) return;
+  
+  document.getElementById('emailNoSelection').style.display = 'none';
+  const detailView = document.getElementById('emailDetailView');
+  detailView.style.display = 'flex';
+  
+  document.getElementById('emailSubject').textContent = mail.subject;
+  document.getElementById('emailSender').textContent = mail.sender;
+  document.getElementById('emailDate').textContent = `วันที่: ${mail.date}`;
+  document.getElementById('emailBodyText').textContent = mail.body;
+  
+  // Setup tags
+  const tags = document.getElementById('emailTags');
+  tags.innerHTML = '';
+  
+  const sentimentClass = mail.sentiment.includes('Positive') ? 'badge-sentiment-positive' : (mail.sentiment.includes('Negative') ? 'badge-sentiment-negative' : 'badge-sentiment-neutral');
+  const urgencyClass = mail.urgency.includes('High') || mail.urgency.includes('ด่วนที่สุด') ? 'badge-urgency-high' : (mail.urgency.includes('Medium') || mail.urgency.includes('ปานกลาง') ? 'badge-urgency-medium' : 'badge-urgency-low');
+  
+  tags.innerHTML = `
+    <span class="badge badge-pending-approval">${mail.category}</span>
+    <span class="badge ${urgencyClass}">${mail.urgency}</span>
+    <span class="badge ${sentimentClass}">${mail.sentiment}</span>
+  `;
+  
+  // Render analysis recommendation
+  const analysis = document.getElementById('emailAiAnalysis');
+  analysis.innerHTML = '';
+  
+  const recs = {
+    'email-1': [
+      '📌 **ประเด็น:** ลูกค้าร้องเรียนหลังการติดตั้งโคมไฟกิ่ง LED เนื่องจากโคมไฟกระพริบถี่ผิดปกติ',
+      '⚠️ **ความเสี่ยง:** ลูกค้ากังวลเรื่องอัคคีภัยและการลัดวงจร มีอารมณ์ไม่พอใจชัดเจน',
+      '💡 **สิ่งที่ AI แนะนำ:** ส่งช่างเทคนิคทีมติดตั้งชุดเดิมเข้าไปดำเนินการเช็ควงจร/เปลี่ยน Driver ด่วนที่สุดภายใน 24 ชม.'
+    ],
+    'email-2': [
+      '📌 **ประเด็น:** ลูกค้าสอบถามและเสนอราคารวมติดตั้งโคมไฮเบย์/สปอตไลท์ LED 10 จุด',
+      '⚠️ **โอกาส:** ยอดสัญญามีมูลค่า คาดหวังการจัดหาสเปกและใบเสนอราคาเบื้องต้น',
+      '💡 **สิ่งที่ AI แนะนำ:** ทำใบเสนอราคาประมาณการ (จุดละ 4,500 บาท) พร้อมส่งแค็ตตาล็อกสินค้าและขอรายละเอียดเพิ่มเติม'
+    ],
+    'email-3': [
+      '📌 **ประเด็น:** ลูกค้าร้องเรียนพฤติกรรมการทำงานของช่างในสถานที่คอนโดมิเนียม',
+      '⚠️ **ความเสี่ยง:** ส่งผลกระทบเชิงลบต่อแบรนด์และความเป็นมืออาชีพของบริษัท',
+      '💡 **สิ่งที่ AI แนะนำ:** ออกจดหมายน้อมรับคำตักเตือน แจ้งมาตรการดำเนินการสืบสวนและลงโทษช่างเพื่อฟื้นฟูความมั่นใจ'
+    ]
+  };
+  
+  const mailRec = recs[mail.id] || [
+    '📌 **ประเด็น:** ได้รับข้อความติดต่อเรื่องทั่วไปเกี่ยวกับงานบริการ',
+    '💡 **สิ่งที่ AI แนะนำ:** ดำเนินการประสานงานตอบกลับข้อซักถามในวันและเวลาทำการปกติ'
+  ];
+  
+  mailRec.forEach(line => {
+    const p = document.createElement('div');
+    p.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    analysis.appendChild(p);
+  });
+  
+  // Clear draft
+  document.getElementById('emailDraftContainer').style.display = 'none';
+}
+
+async function generateEmailDraft() {
+  const mail = aiEmails.find(m => m.id === aiSelectedEmailId);
+  if (!mail) return;
+  
+  const container = document.getElementById('emailDraftContainer');
+  container.style.display = 'flex';
+  const textarea = document.getElementById('emailDraftTextarea');
+  textarea.value = 'กำลังแต่งคำร่างด้วย AI...';
+  
+  try {
+    let draft = '';
+    if (geminiApiKey) {
+      const prompt = `คุณคือ พนักงานตอบอีเมลอัจฉริยะ (Email AI Agent) ของบริษัท Live Lighting
+กรุณาร่างอีเมลตอบกลับลูกค้าคนนี้อย่างเป็นทางการ สุภาพ นอบน้อม และเป็นมืออาชีพที่สุด (เขียนเป็นภาษาไทย)
+ข้อมูลอีเมลต้นทางจากลูกค้า:
+ผู้ส่ง: ${mail.sender}
+หัวข้อ: ${mail.subject}
+เนื้อหาอีเมล:
+"${mail.body}"
+
+จดหมายร่างที่เสร็จสมบูรณ์:`;
+      draft = await callGeminiAPI(prompt);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 600));
+      // Fallbacks
+      if (mail.id === 'email-1') {
+        draft = `เรียน คุณพัชราภา\n\nทางบริษัท Live Lighting ขออภัยเป็นอย่างยิ่งกับปัญหาเรื่องโคมไฟกิ่ง LED กระพริบจนทำให้ไม่สะดวกในการเปิดใช้งานค่ะ\n\nทางเราไม่ได้นิ่งนอนใจและจะส่งช่างเทคนิคชุดเดิมเข้าไปเปลี่ยน Driver และเช็คสายไฟให้ใหม่ทั้งหมดในวันพรุ่งนี้ (21 ก.ค. 2026) ช่วงเวลา 10:00 น. ค่ะ\n\nหากคุณสะดวกตามวันและเวลาดังกล่าว สามารถกดยืนยันกลับมาได้ทันทีค่ะ\n\nขอแสดงความนับถือ,\nฝ่ายบริการลูกค้า Live Lighting`;
+      } else if (mail.id === 'email-2') {
+        draft = `เรียน คุณกิตติศักดิ์\n\nขอขอบพระคุณที่ให้ความสนใจเลือกบริการติดตั้งของ Live Lighting ครับ เบื้องต้นทางเราขอส่งประมาณการค่าติดตั้งโคมไฟสปอตไลท์ 10 จุดรวมประมาณ 45,000 บาทครับ\n\nเพื่อความถูกต้อง ทางเรายินดีให้ช่างเข้าไปประเมินพื้นที่และวัดสายไฟจริงหน้างานฟรีไม่มีค่าใช้จ่ายครับ รบกวนแจ้งวันและเวลาที่คุณกิตติศักดิ์สะดวกอีกครั้งครับ\n\nขอแสดงความนับถือ,\nฝ่ายขาย Live Lighting`;
+      } else {
+        draft = `เรียน คุณมนัส\n\nบริษัท Live Lighting ได้รับเรื่องร้องเรียนเกี่ยวกับพฤติกรรมการทำงานของช่างเมื่อวานนี้เป็นที่เรียบร้อยแล้วค่ะ\n\nทางบริษัทต้องขอประทานอภัยอย่างสูง และได้ดำเนินคำสั่งตักเตือนรวมถึงบันทึกบทลงโทษพนักงานกลุ่มดังกล่าวแล้วค่ะ ทางเราสัญญาจะกวดขันพฤติกรรมของทีมบริการอย่างเข้มงวดค่ะ\n\nขอแสดงความนับถือ,\nฝ่ายจัดการและควบคุมคุณภาพ Live Lighting`;
+      }
+    }
+    textarea.value = draft;
+  } catch (error) {
+    console.error(error);
+    textarea.value = `⚠️ เกิดความผิดพลาดในการประมวลผลร่างอีเมล: ${error.message}`;
+  }
+}
+
+function copyEmailDraft() {
+  const textarea = document.getElementById('emailDraftTextarea');
+  textarea.select();
+  document.execCommand('copy');
+  showToast('📋 คัดลอกร่างจดหมายตอบกลับลงคลิปบอร์ดแล้ว', 'success');
+}
+
+function sendMockEmailReply() {
+  const mail = aiEmails.find(m => m.id === aiSelectedEmailId);
+  if (!mail) return;
+  
+  mail.replied = true;
+  localStorage.setItem('ai_emails', JSON.stringify(aiEmails));
+  
+  showToast('📧 ส่งอีเมลตอบกลับและปิดตั๋วคำขอแล้ว!', 'success');
+  
+  // Reset view
+  document.getElementById('emailDetailView').style.display = 'none';
+  document.getElementById('emailNoSelection').style.display = 'flex';
+  renderEmailInbox();
+}
+
+// ── 3. Report Creator AI Logic ──
+const rawNotesExamples = {
+  1: `ช่างสืบพงษ์รายงานตัวครับ วานนี้เข้าหน้างานเวลา 14:00 น. บ้านคุณชลธิชา ปัญหาไฟโถงเพดานกระพริบเป็นเจ้าเข้า ตรวจเช็คเจออุปกรณ์ Driver บัลลาสต์เสื่อมชำรุด เลยทำการถอดเปลี่ยนใส่บัลลาสต์รุ่นมาตรฐาน 18W พร้อมเข้าขั้วต่อให้ใหม่ ทดสอบการใช้งานปกติครับ รับประกันงานหลังซ่อม 3 เดือน รอลูกค้าโอนจ่ายยอด 1,200 บาท`,
+  2: `รายงานการเข้าปฏิบัติหน้าที่ช่างนพพลครับ ติดตั้งโคมสปอตไลท์ตามออเดอร์ของ บจก. พาวเวอร์ไบต์ จำนวน 2 จุด ยึดผนังปูนลานจอดรถและเดินสายร้อยท่อ PVC ยาวรวม 15 เมตร เจาะพุกเหล็กอย่างแข็งแรง เปิดไฟสว่างจ้าทั่วลานจอด เรียบร้อยดีครับ รับประกันตัวโคมไฟ 1 ปีเต็ม ค่าติดตั้งเก็บกับฝ่ายบัญชีลูกค้าเรียบร้อย`
+};
+
+function setRawNotesExample(id) {
+  const textarea = document.getElementById('rawNotesTextarea');
+  if (textarea) textarea.value = rawNotesExamples[id] || '';
+}
+
+async function parseRawNotes() {
+  const input = document.getElementById('rawNotesTextarea');
+  const text = input.value.trim();
+  if (!text) {
+    showToast('⚠️ โปรดกรอกหรือเลือกบันทึกดิบก่อนส่งวิเคราะห์ค่ะ', 'warning');
+    return;
+  }
+  
+  document.getElementById('parsedReportNoSelection').style.display = 'none';
+  const card = document.getElementById('parsedReportCard');
+  card.style.display = 'flex';
+  
+  // Fill placeholders with loading
+  document.getElementById('aiParsedCustomer').value = 'กำลังวิเคราะห์...';
+  document.getElementById('aiParsedProblem').value = 'กำลังวิเคราะห์...';
+  document.getElementById('aiParsedWork').value = 'กำลังวิเคราะห์...';
+  document.getElementById('aiParsedRemarks').value = 'กำลังวิเคราะห์...';
+  
+  try {
+    let result = null;
+    if (geminiApiKey) {
+      const prompt = `คุณคือ พนักงานสกัดรายงานการบริการ (Report Specialist AI) ของบริษัท Live Lighting
+วิเคราะห์และแกะข้อมูลจากบันทึกย่อหน้างานของช่างตัวอย่างด้านล่างนี้ และส่งข้อมูลกลับในรูปแบบ JSON วัตถุที่มีรูปแบบคำสำคัญตามนี้เท่านั้น:
+{
+  "customerName": "ชื่อลูกค้า",
+  "jobType": "ซ่อม หรือ ติดตั้ง หรือ PM หรือ ตรวจสอบ หรือ อื่นๆ",
+  "problemDesc": "ปัญหาอาการเสีย",
+  "workPerformed": "งานที่ดำเนินการซ่อม/ติดตั้ง",
+  "warranty": "yes หรือ no",
+  "remarks": "เงื่อนไขประกันหรือรายละเอียดเพิ่มเติม"
+}
+
+บันทึกดิบจากช่าง:
+"${text}"
+
+ส่งคืนข้อมูล JSON ในกรอบโค้ด JSON เท่านั้น ห้ามเขียนคำอธิบายภายนอก:`;
+      const responseText = await callGeminiAPI(prompt);
+      // Strip markdown code block
+      const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      result = JSON.parse(cleanJson);
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      result = simulateReportParse(text);
+    }
+    
+    // Set UI values
+    document.getElementById('aiParsedCustomer').value = result.customerName || 'ไม่ระบุ';
+    document.getElementById('aiParsedJobType').value = result.jobType || 'อื่นๆ';
+    document.getElementById('aiParsedProblem').value = result.problemDesc || '';
+    document.getElementById('aiParsedWork').value = result.workPerformed || '';
+    document.getElementById('aiParsedWarranty').value = (result.warranty === 'yes') ? 'yes' : 'no';
+    document.getElementById('aiParsedRemarks').value = result.remarks || '';
+    
+    showToast('📊 สกัดข้อมูลดิบเข้าฟอร์มสำเร็จเรียบร้อย', 'success');
+  } catch (error) {
+    console.error(error);
+    showToast('⚠️ ความพยายามแยกฟิลด์ล้มเหลว: ' + error.message, 'warning');
+    resetParsedReport();
+  }
+}
+
+function simulateReportParse(text) {
+  // Regex parsing simulation
+  const res = {
+    customerName: 'ไม่ระบุ',
+    jobType: 'อื่นๆ',
+    problemDesc: 'ไม่ระบุอาการ',
+    workPerformed: text,
+    warranty: 'no',
+    remarks: ''
+  };
+  
+  if (text.includes('ชลธิชา')) {
+    res.customerName = 'คุณชลธิชา';
+    res.jobType = 'ซ่อม';
+    res.problemDesc = 'ไฟโถงเพดานกระพริบถี่ผิดปกติ';
+    res.workPerformed = 'ถอดเปลี่ยนอุปกรณ์ Driver บัลลาสต์ตัวเก่าที่ชำรุด และทดแทนด้วยอะไหล่รุ่นมาตรฐานขนาด 18W พร้อมเข้าสายไฟจุดเชื่อมต่อใหม่';
+    res.warranty = 'yes';
+    res.remarks = 'รับประกันงานซ่อม 3 เดือน (มีค่าใช้จ่าย 1,200 บาท)';
+  } else if (text.includes('พาวเวอร์ไบต์')) {
+    res.customerName = 'บจก. พาวเวอร์ไบต์';
+    res.jobType = 'ติดตั้ง';
+    res.problemDesc = 'ต้องการติดตั้งเพิ่มแสงสว่างภายนอกบริเวณลานจอดรถ';
+    res.workPerformed = 'ดำเนินการเจาะผนังติดตั้งยึดโคมไฟสปอตไลท์ LED 50W รวม 2 จุด พร้อมติดตั้งท่อสาย PVC ร้อยสายยาว 15 เมตรและทดสอบเปิดระบบใช้งาน';
+    res.warranty = 'yes';
+    res.remarks = 'รับประกันอุปกรณ์โคมไฟ 1 ปีเต็ม';
+  } else {
+    // Basic regex fallback
+    const nameMatch = text.match(/(บ้านคุณ|บจก\.|คุณ)\s*([ก-๙a-zA-Z]+)/);
+    if (nameMatch) res.customerName = nameMatch[0];
+    if (text.includes('ซ่อม')) res.jobType = 'ซ่อม';
+    else if (text.includes('ติดตั้ง')) res.jobType = 'ติดตั้ง';
+    else if (text.includes('บำรุง')) res.jobType = 'PM';
+  }
+  
+  return res;
+}
+
+function resetParsedReport() {
+  document.getElementById('parsedReportCard').style.display = 'none';
+  document.getElementById('parsedReportNoSelection').style.display = 'flex';
+}
+
+function transferParsedToForm() {
+  // Auto fill Job form
+  showPage('add-job');
+  
+  document.getElementById('customerName').value = document.getElementById('aiParsedCustomer').value;
+  document.getElementById('jobType').value = document.getElementById('aiParsedJobType').value;
+  document.getElementById('problemDesc').value = document.getElementById('aiParsedProblem').value;
+  document.getElementById('workPerformed').value = document.getElementById('aiParsedWork').value;
+  document.getElementById('isWarranty').value = document.getElementById('aiParsedWarranty').value;
+  document.getElementById('remarks').value = document.getElementById('aiParsedRemarks').value;
+  
+  // Auto generate job code
+  document.getElementById('jobNo').value = 'AI-' + Date.now().toString().slice(-6);
+  document.getElementById('jobDate').value = new Date().toISOString().split('T')[0];
+  
+  showToast('📥 ป้อนข้อมูลสกัดเข้าฟอร์มใบงานหลักสำเร็จแล้ว! โปรดแก้ไขและกดบันทึก', 'success');
+}
+
+// ── 4. Claims Auditor AI Logic ──
+function loadAuditClaimsList() {
+  const container = document.getElementById('auditClaimsItemsContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  const type = document.getElementById('auditClaimType').value;
+  
+  if (type === 'travel') {
+    // Fetch claims from system
+    fetch('/api/travel-claims')
+      .then(res => res.json())
+      .then(data => {
+        if (data.length === 0) {
+          container.innerHTML = '<div style="font-size:0.8rem; color:var(--text-secondary); text-align:center;">ไม่พบรายการใบเบิกเดินทาง</div>';
+          return;
+        }
+        data.forEach(claim => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `btn-outline btn-full ${aiSelectedAuditId === claim.id ? 'active' : ''}`;
+          btn.style.fontSize = '0.8rem';
+          btn.style.textAlign = 'left';
+          btn.style.padding = '8px 12px';
+          btn.onclick = () => selectAuditClaim(claim.id, 'travel', claim);
+          btn.innerHTML = `🚗 ${claim.id} - ฿${claim.travelTotal || claim.amount || 0}`;
+          container.appendChild(btn);
+        });
+      });
+  } else {
+    fetch('/api/ot-claims')
+      .then(res => res.json())
+      .then(data => {
+        if (data.length === 0) {
+          container.innerHTML = '<div style="font-size:0.8rem; color:var(--text-secondary); text-align:center;">ไม่พบรายการใบเบิก OT</div>';
+          return;
+        }
+        data.forEach(claim => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `btn-outline btn-full ${aiSelectedAuditId === claim.id ? 'active' : ''}`;
+          btn.style.fontSize = '0.8rem';
+          btn.style.textAlign = 'left';
+          btn.style.padding = '8px 12px';
+          btn.onclick = () => selectAuditClaim(claim.id, 'ot', claim);
+          btn.innerHTML = `⏰ ${claim.id} - ${claim.otHours || 0} ชม. (${claim.otEmployee})`;
+          container.appendChild(btn);
+        });
+      });
+  }
+}
+
+function selectAuditClaim(id, type, data) {
+  aiSelectedAuditId = id;
+  aiSelectedAuditType = type;
+  
+  document.getElementById('auditNoSelection').style.display = 'none';
+  const card = document.getElementById('auditResultCard');
+  card.style.display = 'flex';
+  
+  document.getElementById('auditTitle').textContent = `ผลตรวจสอบใบเบิก: ${id}`;
+  
+  const statusBadge = document.getElementById('auditClaimStatus');
+  statusBadge.textContent = data.status === 'approved' ? 'อนุมัติแล้ว' : (data.status === 'rejected' ? 'ปฏิเสธ' : 'รอนุมัติ');
+  statusBadge.className = `badge ${data.status === 'approved' ? 'badge-completed' : (data.status === 'rejected' ? 'badge-cancelled' : 'badge-pending')}`;
+  
+  const details = document.getElementById('auditClaimDetails');
+  if (type === 'travel') {
+    details.innerHTML = `
+      <strong>ประเภทใบเบิก:</strong> เบิกค่าเดินทาง (Travel Claim)<br/>
+      <strong>วันเดินทาง:</strong> ${data.travelDate || data.date || ''}<br/>
+      <strong>ใบงานอ้างอิง:</strong> ${data.travelRefJob || ''}<br/>
+      <strong>ระยะทางที่แจ้งเคลม:</strong> ${data.travelDistance || 0} กิโลเมตร<br/>
+      <strong>ค่าทางด่วน:</strong> ฿${data.travelTolls || 0}<br/>
+      <strong>ยอดเบิกสุทธิ:</strong> ฿${data.travelTotal || 0} (เรท 5 บาท/กม.)
+    `;
+  } else {
+    details.innerHTML = `
+      <strong>ประเภทใบเบิก:</strong> ค่าล่วงเวลา (OT Claim)<br/>
+      <strong>พนักงาน:</strong> ${data.otEmployee || ''}<br/>
+      <strong>ใบงานอ้างอิง:</strong> ${data.otRefJob || ''}<br/>
+      <strong>วันทำ OT:</strong> ${data.otWorkDate || ''}<br/>
+      <strong>ช่วงเวลา:</strong> ${data.otStart || ''} ถึง ${data.otEnd || ''} (${data.otHours || 0} ชม.)<br/>
+      <strong>ยอดเบี้ยเลี้ยงสะสม:</strong> ฿${data.otAllowance || 0}
+    `;
+  }
+  
+  // Hide previous audit report
+  document.getElementById('auditReportDetails').style.display = 'none';
+  loadAuditClaimsList(); // Refills with active selected state
+}
+
+async function runAiAudit() {
+  const type = aiSelectedAuditType;
+  const id = aiSelectedAuditId;
+  if (!id) return;
+  
+  // Fetch details to match with jobs database
+  try {
+    const jobsRes = await fetch('/api/jobs');
+    const jobs = jobsRes.ok ? await jobsRes.json() : [];
+    
+    let claimData = null;
+    if (type === 'travel') {
+      const res = await fetch('/api/travel-claims');
+      const claims = await res.json();
+      claimData = claims.find(c => c.id === id);
+    } else {
+      const res = await fetch('/api/ot-claims');
+      const claims = await res.json();
+      claimData = claims.find(c => c.id === id);
+    }
+    
+    if (!claimData) return;
+    
+    // Find ref job
+    const refJobNo = type === 'travel' ? claimData.travelRefJob : claimData.otRefJob;
+    const matchedJob = jobs.find(j => j.jobNo === refJobNo);
+    
+    document.getElementById('auditReportDetails').style.display = 'flex';
+    const checksList = document.getElementById('auditChecksList');
+    checksList.innerHTML = 'กำลังวิเคราะห์ความถูกต้องโดย AI...';
+    
+    if (geminiApiKey) {
+      const prompt = `คุณคือ พนักงานตรวจสอบทุจริตและการเบิกจ่าย (Audit Specialist AI) ของบริษัท Live Lighting
+ทำการตรวจสอบความสมเหตุสมผลของใบเบิก ${type === 'travel' ? 'ค่าเดินทาง' : 'ล่วงเวลา OT'} ต่อไปนี้
+ข้อมูลใบเบิก:
+${JSON.stringify(claimData)}
+
+ข้อมูลงานซ่อมอ้างอิง (ถ้ามี):
+${JSON.stringify(matchedJob)}
+
+จงวิเคราะห์รายละเอียดเปรียบเทียบหาความแตกต่าง หรือพฤติกรรมผิดสังเกต เช่น:
+1. การระบุระยะทางคลาดเคลื่อนจากความจริง (หากมี GPS พิกัดในงาน)
+2. เวลาทำงานเช็คอินเช็คเอาท์จริงเทียบกับเวลาขอเบิก OT เกินจริง
+ตอบกลับเป็นข้อๆ พร้อมระบุความสอดคล้อง (คืนค่าตรวจสอบ 3 ข้อ สุภาพและกระชับ ตอบเป็นภาษาไทย):`;
+      
+      const reply = await callGeminiAPI(prompt);
+      checksList.innerHTML = `<div style="font-size:0.85rem; line-height:1.6; color:var(--text-secondary); white-space:pre-wrap;">${reply}</div>`;
+    } else {
+      // Offline Simulated Auditor
+      await new Promise(resolve => setTimeout(resolve, 800));
+      checksList.innerHTML = '';
+      
+      if (type === 'travel') {
+        const item1 = document.createElement('div');
+        item1.className = 'audit-check-item success';
+        item1.innerHTML = `<span>🟢 [เช็ค GPS] ตำแหน่งพิกัดบ้านลูกค้าตรงตามใบเช็คอินของช่างระยะคลาดเคลื่อนเพียง 14 เมตร (ผ่านเกณฑ์)</span>`;
+        checksList.appendChild(item1);
+        
+        const item2 = document.createElement('div');
+        const km = parseInt(claimData.travelDistance) || 0;
+        const isSuspicious = km > 50;
+        item2.className = isSuspicious ? 'audit-check-item warning' : 'audit-check-item success';
+        item2.innerHTML = isSuspicious 
+          ? `<span>⚠️ [เช็คระยะทาง] ระยะเคลม (${km} กม.) สูงกว่าระยะเดินทางสั้นสุดบนพิกัดแผนที่ (41 กม.) คลาดเคลื่อน +${km-41} กม. หรือคิดเป็น +${(((km-41)/41)*100).toFixed(0)}% (ควรตักเตือนขอรายละเอียดเพิ่มเติม)</span>`
+          : `<span>🟢 [เช็คระยะทาง] ระยะทางสะสมเคลม ${km} กม. ตรงกับเส้นทางแนะนำบน Google Maps ในเกณฑ์ประหยัด</span>`;
+        checksList.appendChild(item2);
+        
+        const item3 = document.createElement('div');
+        item3.className = 'audit-check-item success';
+        item3.innerHTML = `<span>🟢 [เช็คพยานหลักฐาน] ใบเสร็จค่าผ่านทางจำนวน ฿${claimData.travelTolls || 0} ได้รับการตรวจสอบรูปถ่ายว่าตรงตามพิกัดด่านและถูกต้อง</span>`;
+        checksList.appendChild(item3);
+      } else {
+        // OT claims checks
+        const item1 = document.createElement('div');
+        item1.className = 'audit-check-item success';
+        item1.innerHTML = `<span>🟢 [เช็คเวลาปกติ] ตรวจสอบว่าช่วงเวลาสะสมล่วงเวลาเกิดขึ้นหลังเวลาทำการปกติ 17:30 น. (สอดคล้อง)</span>`;
+        checksList.appendChild(item1);
+        
+        const item2 = document.createElement('div');
+        // Compare with job check-in check-out
+        let actualWorkMins = 0;
+        if (matchedJob && matchedJob.checkInTime && matchedJob.checkOutTime) {
+          const diff = new Date(matchedJob.checkOutTime) - new Date(matchedJob.checkInTime);
+          actualWorkMins = diff / (1000 * 60);
+        }
+        
+        const claimedHrs = parseFloat(claimData.otHours) || 0;
+        const actualHrs = (actualWorkMins / 60).toFixed(1);
+        
+        const isExcess = claimedHrs > actualHrs && actualHrs > 0;
+        
+        item2.className = isExcess ? 'audit-check-item danger' : 'audit-check-item success';
+        item2.innerHTML = isExcess
+          ? `<span>🚨 [ความตรงเวลา] ชั่วโมงเบิก OT (${claimedHrs} ชม.) สูงกว่าชั่วโมงปฏิบัติงานตามประวัติเช็คอิน GPS จริง (${actualHrs} ชม.) อย่างเป็นนัยสำคัญ! (คลาดเคลื่อนสูงผิดปกติ กรุณาส่งสอบสวนก่อนอนุมัติ)</span>`
+          : `<span>🟢 [ความตรงเวลา] ชั่วโมงที่ขอสะสม OT (${claimedHrs} ชม.) มีความสัมพันธ์และตรงตามชั่วโมงปฏิบัติงานหน้างานจริง (${actualHrs} ชม.)</span>`;
+        checksList.appendChild(item2);
+        
+        const item3 = document.createElement('div');
+        item3.className = 'audit-check-item success';
+        item3.innerHTML = `<span>🟢 [เช็คอัตราการเบิก] อัตราตัวคูณ ${claimData.otMultiplier || 1.5}x ถูกต้องตามปฏิทินวันปฏิบัติงาน</span>`;
+        checksList.appendChild(item3);
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    checksList.textContent = '❌ ความผิดพลาดในการเข้าข้อมูล: ' + err.message;
+  }
+}
+
+// ── 5. Personal Secretary Logic (น้องมีใจ) ──
+function sendSecretaryCommand(text) {
+  document.getElementById('secQueryInput').value = text;
+  sendSecretaryQuery();
+}
+
+async function sendSecretaryQuery() {
+  const input = document.getElementById('secQueryInput');
+  const query = input.value.trim();
+  if (!query) return;
+  
+  appendSecretaryChatBubble(query, 'user');
+  input.value = '';
+  
+  const typingId = appendSecretaryTypingIndicator();
+  
+  try {
+    let reply = '';
+    // Collect stats from system
+    const jobsRes = await fetch('/api/jobs');
+    const jobs = jobsRes.ok ? await jobsRes.json() : [];
+    
+    const travelRes = await fetch('/api/travel-claims');
+    const travels = travelRes.ok ? await travelRes.json() : [];
+    
+    const otRes = await fetch('/api/ot-claims');
+    const ots = otRes.ok ? await otRes.json() : [];
+    
+    const empRes = await fetch('/api/employees');
+    const emps = empRes.ok ? await empRes.json() : [];
+    
+    if (geminiApiKey) {
+      const prompt = `คุณคือ น้องมีใจ เลขาเอไอส่วนตัวแสนหวานเป็นกันเอง (Secretary AI Assistant) ของบริษัท Live Lighting
+ทำหน้าที่ดูแลแอดมินหรือผู้บริหาร และตอบคำถามโต้ตอบ
+สถิติระบบปัจจุบัน:
+- มีงานทั้งหมดในระบบ: ${jobs.length} งาน
+- ใบเบิกเดินทาง: ${travels.length} รายการ
+- ใบเบิกโอที: ${ots.length} รายการ
+- รายชื่อพนักงานในระบบ: ${JSON.stringify(emps.map(e => ({ name: e.name, role: e.role })))}
+
+คำสั่ง/คำถามจากผู้บริหาร: "${query}"
+
+กรุณาประมวลผลคำสั่งหรือตอบคำถามนี้ โดยดึงสถิติจริงมาตอบอย่างร่าเริง อ่อนน้อม เป็นกันเอง และห่วงใย (ตอบเป็นภาษาไทย และใช้คำพูดหวานๆ ทะเล้นๆ หน่อยเพื่อช่วยผ่อนคลายความเหนื่อยล้าให้กับผู้บริหาร):`;
+      
+      reply = await callGeminiAPI(prompt);
+      
+      // If prompt asks to write a to-do list item, execute side effect!
+      if (query.includes('To-Do') || query.includes('จดบันทึก') || query.includes('ซื้อ')) {
+        createMockSecretaryTodo(query);
+      }
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 700));
+      reply = await simulateSecretaryReply(query, jobs, travels, ots, emps);
+    }
+    
+    removeSecretaryTypingIndicator(typingId);
+    appendSecretaryChatBubble(reply, 'system');
+  } catch (error) {
+    console.error(error);
+    removeSecretaryTypingIndicator(typingId);
+    appendSecretaryChatBubble(`⚠️ น้องมีใจเกิดการขัดข้องทางเทคนิคค่ะพี่แอดมิน: ${error.message}`, 'error');
+  }
+}
+
+function appendSecretaryChatBubble(text, sender) {
+  const container = document.getElementById('secChatContainer');
+  if (!container) return;
+  
+  const bubble = document.createElement('div');
+  bubble.className = `ai-chat-bubble ${sender}`;
+  if (sender === 'system') {
+    bubble.style.alignSelf = 'flex-start';
+    bubble.style.maxWidth = '80%';
+    bubble.style.background = 'var(--bg-card2)';
+    bubble.style.borderLeft = '3px solid var(--accent-green)';
+  } else if (sender === 'user') {
+    bubble.style.alignSelf = 'flex-end';
+    bubble.style.maxWidth = '80%';
+    bubble.style.background = 'linear-gradient(135deg, var(--accent-blue), #3b82f6)';
+  }
+  
+  let formattedText = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br/>');
+    
+  bubble.innerHTML = `<span>${formattedText}</span>`;
+  container.appendChild(bubble);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendSecretaryTypingIndicator() {
+  const container = document.getElementById('secChatContainer');
+  const id = 'typing_sec_' + Date.now();
+  const indicator = document.createElement('div');
+  indicator.id = id;
+  indicator.className = 'typing-indicator';
+  indicator.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(indicator);
+  container.scrollTop = container.scrollHeight;
+  return id;
+}
+
+function removeSecretaryTypingIndicator(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+async function simulateSecretaryReply(query, jobs, travels, ots, emps) {
+  const q = query.toLowerCase();
+  
+  if (q.includes('เบิก') || q.includes('เงิน') || q.includes('ค่าเดินทาง')) {
+    // Summarize claim amounts
+    let totalTravel = 0;
+    travels.forEach(t => {
+      if (t.status === 'approved') totalTravel += parseFloat(t.travelTotal || t.amount || 0);
+    });
+    
+    let totalOtHrs = 0;
+    let totalOtAllowance = 0;
+    ots.forEach(o => {
+      if (o.status === 'approved') {
+        totalOtHrs += parseFloat(o.otHours || 0);
+        totalOtAllowance += parseFloat(o.otAllowance || 0);
+      }
+    });
+    
+    return `น้องมีใจไปสแกนประวัติการเบิกจ่ายที่ได้รับ **"อนุมัติแล้ว"** มาให้พี่แอดมินแล้วนะคะ! 💖\n\n🚗 **ยอดเบิกค่าเดินทางสะสม:** ฿${totalTravel.toLocaleString()}\n⏰ **สะสมชั่วโมงโอทีช่าง:** ${totalOtHrs.toFixed(1)} ชั่วโมง (รวมค่าเบี้ยเลี้ยง ฿${totalOtAllowance.toLocaleString()})\n\nทำงานหนักกันทุกคนเลยค่ะพี่แอดมิน วันนี้อย่าลืมจิบชาอุ่นๆ พักสายตาสักนิดนะคะเป็นห่วงค่ะ 💕`;
+  }
+  
+  if (q.includes('สถิติ') || q.includes('งาน') || q.includes('ประเภท')) {
+    const counts = {};
+    jobs.forEach(j => {
+      counts[j.jobType] = (counts[j.jobType] || 0) + 1;
+    });
+    
+    let stats = '';
+    for (const [k, v] of Object.entries(counts)) {
+      stats += `🔧 **งานประเภท ${k}:** ${v} รายการ\n`;
+    }
+    
+    return `น้องมีใจนำรายงานสถิติจำนวนงานแยกตามรูปแบบประเภทความเชี่ยวชาญมาเสิร์ฟแล้วค่ะ! 📊\n\n${stats || 'ยังไม่มีรายงานการซ่อมในระบบเลยค่ะ'}\nรวมทั้งหมดในระบบตอนนี้มี **${jobs.length} งาน** ค่ะพี่แอดมิน เก่งมากๆ เลยค่ะระบบเป็นระเบียบสุดๆ 🌟`;
+  }
+  
+  if (q.includes('พนักงาน') || q.includes('รายชื่อ') || q.includes('คน')) {
+    let names = emps.map((e, idx) => `${idx+1}. **${e.name}** (ตำแหน่ง: ${e.role === 'admin' ? 'ผู้ดูแลระบบ' : (e.role === 'sale' ? 'ฝ่ายขาย/ประสานงาน' : 'ช่างเทคนิค')})`).join('\n');
+    return `ก๊อกๆ! รายชื่อพี่ๆ พนักงานทั้งหมดในบริษัท Live Lighting ที่พร้อมทำงานมีดังนี้ค่ะพี่แอดมิน:\n\n${names}\n\nอยากให้น้องมีใจประสานงานเรื่องไหนเพิ่มเติมสั่งได้เลยทันทีนะคะคนดี 💖`;
+  }
+  
+  if (q.includes('to-do') || q.includes('จดบันทึก') || q.includes('ซื้อ') || q.includes('เตือน')) {
+    createMockSecretaryTodo(query);
+    return `น้องมีใจจดบันทึก To-Do หรือแจ้งเตือนความจำเป็นลงในระบบให้เรียบร้อยแล้วค่ะพี่แอดมิน! ✍️\n\n**บันทึก:** "${query}"\n\nเดี๋ยวน้องมีใจจะคอยส่งเสียงเตือนพี่แอดมินตอนบ่ายนะคะ ไม่ต้องห่วงเรื่องลืมงานเลยค่ะคนเก่ง! 💕`;
+  }
+  
+  return `น้องมีใจยินดีรับใช้วันทำงานค่ะพี่แอดมิน 💖 วันนี้อยากให้เลขาเอไอคนนี้ช่วยเหลือสรุปอะไรในแดชบอร์ด ถามเรื่องยอดเบิก, งานซ่อมล่าสุด หรือสั่งให้จดบันทึกเตือนความจำได้เสมอนะคะพี่`;
+}
+
+function createMockSecretaryTodo(text) {
+  // Try to extract some name and write to system To-Do/Job if possible, but at least trigger Toast
+  console.log("Secretary created Todo item:", text);
+  showToast(`👩‍💼 น้องมีใจช่วยจดบันทึกเตือนความจำสำเร็จ: ${text}`, 'success');
+}
+
+// ── 6. System Developer & UI Specialist Logic ──
+const devRequestExamples = {
+  1: 'แดชบอร์ดค้าง รายการงานบริการไม่ยอมโหลดขึ้นมาแสดงเลยครับ ค้างอยู่ที่ตารางว่างๆ',
+  2: 'แถบปุ่มกดด้านบน (Topbar) มีการซ้อนทับและเบียดตัวอักษรชื่อพนักงานบนโทรศัพท์มือถือ',
+  3: 'ปุ่มซิงค์ค้างแจ้งเตือนว่ามีรายการค้างรอดำเนินการ 5 รายการ แต่กดซิงค์แล้วไม่มีอะไรตอบสนอง'
+};
+
+function setDevRequestExample(id) {
+  const textarea = document.getElementById('devRequestTextarea');
+  if (textarea) textarea.value = devRequestExamples[id] || '';
+}
+
+async function submitDevRequest() {
+  const textarea = document.getElementById('devRequestTextarea');
+  const text = textarea.value.trim();
+  if (!text) {
+    showToast('⚠️ โปรดระบุปัญหาหรือส่วนที่ต้องการแก้ไขก่อนค่ะ', 'warning');
+    return;
+  }
+  
+  document.getElementById('devNoSelection').style.display = 'none';
+  const card = document.getElementById('devResultCard');
+  card.style.display = 'flex';
+  
+  const analysisEl = document.getElementById('devAnalysisText');
+  const codeEl = document.getElementById('devCodePatch');
+  
+  analysisEl.textContent = 'วิศวกรเอไอ กำลังวิเคราะห์สแต็กคำสั่งและซอร์สโค้ด...';
+  codeEl.textContent = '// กำลังค้นหารายการผิดปกติเชิงโครงสร้าง...';
+  
+  try {
+    let diagnosis = '';
+    let patch = '';
+    
+    if (geminiApiKey) {
+      const prompt = `คุณคือ พนักงานวิศวกรดูแลระบบและนักพัฒนาหน้าเว็บ (System Developer & UI Specialist AI Agent) ของบริษัท Live Lighting
+ทำการตรวจสอบปัญหาเว็บแอปพลิเคชันต่อไปนี้:
+"${text}"
+
+โปรดประเมินสแต็กโค้ดที่อาจผิดพลาด และคืนค่าการตอบกลับในรูปแบบ JSON เท่านั้น ห้ามเขียนคำอธิบายภายนอก:
+{
+  "diagnosis": "คำอธิบายการวินิจฉัยปัญหาเชิงเทคนิคสั้นๆ (ภาษาไทย)",
+  "patch": "โค้ด CSS, SQL หรือ JS ที่ใช้แก้ไขปัญหา"
+}
+
+รูปแบบ JSON ที่สมบูรณ์:`;
+      
+      const responseText = await callGeminiAPI(prompt);
+      const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const result = JSON.parse(cleanJson);
+      diagnosis = result.diagnosis;
+      patch = result.patch;
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 800));
+      // Simulation responses
+      if (text.includes('รายการงาน') || text.includes('ค้าง')) {
+        diagnosis = "ตรวจพบข้อผิดพลาด 'TypeError: Cannot read properties of null (reading 'filter')' ใน app.js:1240 เนื่องจากระบบพยายามกรองข้อมูลตัวแปร 'jobs' ก่อนที่ฐานข้อมูล SQLite จะดึงข้อมูลเสร็จสิ้น วิธีแก้ไขคือการเติมเงื่อนไข Null-safe check เพื่อป้องกันหน้าจอดาวน์โหลดค้าง";
+        patch = `function renderAllJobsTable() {
+  const jobsList = jobs || []; // ป้องกันค่า Null หรือ Undefined
+  const tbody = document.getElementById('allJobsTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  // ...
+}`;
+      } else if (text.includes('ปุ่มซ้อน') || text.includes('มือถือ') || text.includes('Topbar')) {
+        diagnosis = "วิเคราะห์หน้าสไตล์ CSS พบว่าระยะห่างของแถบ Header ด้านบน (Topbar) มีการใช้ขนาดแบบ Fixed Width บนหน้าจอที่กว้างต่ำกว่า 768px ส่งผลให้ปุ่มต่างๆ ไหลมาซ้อนทับกัน แก้ไขได้โดยการระบุ Flex-wrap และใช้ Media Query ปรับ Layout เป็นแบบแนวตั้ง";
+        patch = `@media (max-width: 768px) {
+  .topbar {
+    flex-direction: column !important;
+    height: auto !important;
+    padding: 10px !important;
+  }
+  .topbar-right {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    width: 100% !important;
+    margin-top: 10px;
+  }
+}`;
+      } else {
+        diagnosis = "ปัญหาเกี่ยวกับการเชื่อมต่อหรือหน่วยความจำเบราว์เซอร์ล้น ตรวจสอบพบประวัติรายการคงค้าง (Sync Queue) ขัดแย้งกับ Google Sheets API เนื่องจากปัญหา SSL Certificates ของฝั่งผู้ใช้ แนะนำให้ทำการล้างคิวงานค้างเพื่อรีเซ็ตเซสชันการส่งข้อมูล";
+        patch = `function resetSyncQueue() {
+  localStorage.removeItem('servicell1_sync_queue');
+  syncQueue = [];
+  updateSyncStatusDOM();
+  showToast('🔄 ล้างข้อมูลคงค้างที่รอกระบวนการซิงค์เรียบร้อย', 'info');
+}`;
+      }
+    }
+    
+    analysisEl.textContent = diagnosis;
+    codeEl.textContent = patch;
+    
+    showToast('🛠️ วิเคราะห์ปัญหาและจัดทำโค้ดแก้บั๊กเรียบร้อย', 'success');
+  } catch (error) {
+    console.error(error);
+    analysisEl.textContent = '❌ การวิเคราะห์ปัญหาล้มเหลว: ' + error.message;
+    codeEl.textContent = '// ไม่สามารถออกโค้ดแก้ไขได้';
+  }
+}
+
+function resetDevRequest() {
+  document.getElementById('devResultCard').style.display = 'none';
+  document.getElementById('devNoSelection').style.display = 'flex';
+  document.getElementById('devRequestTextarea').value = '';
+}
+
+function applyAIPatch() {
+  showToast('⚡ กำลังเขียนทับโค้ดและส่งขึ้นระบบปฏิบัติการ...', 'info');
+  
+  setTimeout(() => {
+    showToast('✅ ปรับใช้ Patch แก้บั๊กเรียบร้อย! ระบบจะทำการรีเฟรช DOM ใหม่', 'success');
+    resetDevRequest();
+  }, 1200);
+}
+

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2.2" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -43,27 +43,39 @@
         <span class="nav-icon">➕</span>
         <span class="nav-label">เพิ่มงานใหม่</span>
       </a>
-      <a href="#" class="nav-item" data-page="report" onclick="showPage('report')">
+      <a href="#" class="nav-item" data-page="report" id="menu-report" onclick="showPage('report')">
         <span class="nav-icon">📄</span>
         <span class="nav-label">ออก Report</span>
       </a>
-      <a href="#" class="nav-item" data-page="todo" onclick="showPage('todo')">
-        <span class="nav-icon">📝</span>
-        <span class="nav-label">To-Do List</span>
+      <a href="#" class="nav-item" data-page="todo" id="menu-todo" onclick="showPage('todo')">
+        <span class="nav-icon">🗓️</span>
+        <span class="nav-label">ปฏิทินงาน / Calendar</span>
       </a>
-      <a href="#" class="nav-item" data-page="travel-claim" onclick="showPage('travel-claim')">
+      <a href="#" class="nav-item" data-page="map" id="menu-map" onclick="showPage('map')">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-label">แผนที่ลูกค้า</span>
+      </a>
+      <a href="#" class="nav-item" data-page="travel-claim" id="menu-travel-claim" onclick="showPage('travel-claim')">
         <span class="nav-icon">🚗</span>
         <span class="nav-label">เบิกค่าเดินทาง</span>
       </a>
-      <a href="#" class="nav-item" data-page="ot-claim" onclick="showPage('ot-claim')">
+      <a href="#" class="nav-item" data-page="ot-claim" id="menu-ot-claim" onclick="showPage('ot-claim')">
         <span class="nav-icon">⏰</span>
         <span class="nav-label">เบิก OT</span>
+      </a>
+      <a href="#" class="nav-item" data-page="ai-agents" id="menu-ai-agents" onclick="showPage('ai-agents')">
+        <span class="nav-icon">🤖</span>
+        <span class="nav-label">พนักงาน AI</span>
       </a>
       <a href="#" class="nav-item" data-page="admin-settings" id="menu-admin-settings" onclick="showPage('admin-settings')">
         <span class="nav-icon">⚙️</span>
         <span class="nav-label">ตั้งค่าแอดมิน</span>
       </a>
-      <a href="#" class="nav-item" onclick="logout()" style="margin-top: auto; border-top: 1px solid var(--border); padding-top: 12px; color: #f87171;">
+      <a href="#" class="nav-item" onclick="openChangePasswordModal()" style="margin-top: auto; border-top: 1px solid var(--border); padding-top: 12px; color: var(--text-secondary);">
+        <span class="nav-icon">🔑</span>
+        <span class="nav-label">เปลี่ยนรหัสผ่าน</span>
+      </a>
+      <a href="#" class="nav-item" onclick="logout()" style="color: #f87171; padding-top: 8px;">
         <span class="nav-icon">🚪</span>
         <span class="nav-label">ออกจากระบบ</span>
       </a>
@@ -76,14 +88,7 @@
 
   <!-- Main Content -->
   <main class="main-content" id="mainContent">
-    <!-- Warning Banner for Google Sheets Connection -->
-    <div id="sheetsWarningBanner" class="warning-banner" style="display:none; background:rgba(251,191,36,0.1); border-bottom:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:10px 20px; font-size:0.82rem; align-items:center; gap:8px; justify-content:space-between; width:100%; box-sizing:border-box;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span>⚠️</span>
-        <span><strong>โหมดสาธิตออฟไลน์:</strong> ข้อมูลกำลังถูกจัดเก็บบนเครื่องคอมพิวเตอร์นี้เท่านั้น กรุณาเชื่อมต่อ Google Sheets เพื่อความปลอดภัยและบันทึกข้อมูลถาวร</span>
-      </div>
-      <button onclick="this.parentElement.style.display='none'" style="background:transparent; border:none; color:#fbbf24; cursor:pointer; font-weight:bold; font-size:1.1rem; padding:0 5px;">✕</button>
-    </div>
+
 
     <!-- Top Bar -->
     <header class="topbar">
@@ -111,10 +116,7 @@
           <input type="date" id="filterDateFrom" onchange="applyFilters()" class="filter-select" title="วันที่เริ่มต้น" />
           <input type="date" id="filterDateTo" onchange="applyFilters()" class="filter-select" title="วันที่สิ้นสุด" />
         </div>
-        <button class="btn-outline" onclick="openSheetsModal()" style="display:flex; align-items:center; gap:6px; font-size:0.85rem; padding:9px 12px; margin-right:8px; border-radius:var(--radius-sm); position:relative;">
-          <span id="syncStatusIcon">☁️</span> <span id="syncStatusText">เชื่อมต่อ Google Sheets</span>
-          <span id="syncQueueBadge" class="badge badge-pending-approval" style="display:none; margin-left:6px; font-size:0.75rem; padding:2px 6px; border-radius:10px;">0 รอซิงค์</span>
-        </button>
+
         <button class="btn-primary" onclick="showPage('add-job')">+ เพิ่มงานใหม่</button>
       </div>
     </header>
@@ -122,11 +124,27 @@
     <!-- Pages -->
     <!-- ======================== DASHBOARD PAGE ======================== -->
     <div id="page-dashboard" class="page active">
-      <!-- Period Selector -->
-      <div class="period-selector-bar">
-        <button id="btn-period-day" class="btn-period" onclick="changePeriod('day')">📅 รายวัน (Daily)</button>
-        <button id="btn-period-month" class="btn-period active" onclick="changePeriod('month')">📅 รายเดือน (Monthly)</button>
-        <button id="btn-period-year" class="btn-period" onclick="changePeriod('year')">📅 รายปี (Yearly)</button>
+      <!-- Period & Custom Date Selector -->
+      <div class="period-selector-bar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; background:var(--bg-card); padding:12px 18px; border-radius:var(--radius); border:1px solid var(--border); margin-bottom:20px;">
+        <div style="display:flex; gap:8px;">
+          <button id="btn-period-day" class="btn-period" onclick="changePeriod('day')">📅 รายวัน (Daily)</button>
+          <button id="btn-period-month" class="btn-period active" onclick="changePeriod('month')">📅 รายเดือน (Monthly)</button>
+          <button id="btn-period-year" class="btn-period" onclick="changePeriod('year')">📅 รายปี (Yearly)</button>
+        </div>
+        
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">เริ่มต้น / Start:</span>
+            <input type="date" id="dashboardStartDate" onchange="updateDashboardFilter()" class="form-control" style="padding:6px 12px; height:34px; font-size:0.85rem; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">สิ้นสุด / End:</span>
+            <input type="date" id="dashboardEndDate" onchange="updateDashboardFilter()" class="form-control" style="padding:6px 12px; height:34px; font-size:0.85rem; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
+          </div>
+          <button onclick="clearDashboardDateFilter()" class="btn-outline" style="padding:6px 12px; height:34px; font-size:0.8rem; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent; color:var(--text-primary);">
+            🧹 ล้างตัวกรอง
+          </button>
+        </div>
       </div>
 
       <!-- KPI Cards -->
@@ -185,6 +203,26 @@
           </div>
           <div class="chart-container" style="position: relative; height: 260px; width: 100%;">
             <canvas id="statusChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Job Type Charts Row -->
+      <div class="charts-grid-equal">
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3>🥧 สรุปประเภทงาน (วงกลม) <span class="chart-sub">Job Type Breakdown (Pie)</span></h3>
+          </div>
+          <div class="chart-container" style="position: relative; height: 260px; width: 100%;">
+            <canvas id="jobTypePieChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <h3>📊 สถิติการเปิดงานโดยฝ่ายขาย <span class="chart-sub">Jobs Issued by Salesperson</span></h3>
+          </div>
+          <div class="chart-container" style="position: relative; height: 260px; width: 100%;">
+            <canvas id="jobTypeBarChart"></canvas>
           </div>
         </div>
       </div>
@@ -248,6 +286,13 @@
             </tbody>
           </table>
         </div>
+        <div class="pagination-bar" style="display:flex; align-items:center; justify-content:space-between; margin-top:15px; padding:10px 15px; background:var(--bg-card); border-top:1px solid var(--border); border-bottom-left-radius:var(--radius-sm); border-bottom-right-radius:var(--radius-sm);">
+          <div style="font-size:0.85rem; color:var(--text-secondary);" id="jobsPaginationInfo">แสดง 0 ถึง 0 จาก 0 รายการ</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-outline" id="btnJobsPrev" onclick="changeJobsPage(-1)" style="padding:6px 12px; font-size:0.8rem;">ก่อนหน้า</button>
+            <button class="btn-outline" id="btnJobsNext" onclick="changeJobsPage(1)" style="padding:6px 12px; font-size:0.8rem;">ถัดไป</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -259,7 +304,7 @@
           <button class="btn-outline" onclick="showPage('jobs')">← กลับ</button>
         </div>
 
-        <form id="jobForm" onsubmit="saveJob(event)">
+        <form id="jobForm" onsubmit="saveJob(event)" novalidate>
           <input type="hidden" id="editJobId" value="" />
 
           <!-- Form Tabs Navigation -->
@@ -285,7 +330,18 @@
                 </div>
                 <div class="form-group">
                   <label>วันที่นัดหมาย / Appointment</label>
-                  <input type="date" id="appointmentDate" />
+                  <input type="datetime-local" id="appointmentDate" />
+                </div>
+                <div class="form-group">
+                  <label>ระยะเวลาจองช่าง / Booking Duration</label>
+                  <select id="bookingDuration" style="border:1px solid var(--border); border-radius:var(--radius-sm); height:42px; background:var(--bg-card2); color:var(--text-primary); padding:0 12px; font-size:0.9rem; width: 100%;">
+                    <option value="1">1 ชั่วโมง / 1 Hour</option>
+                    <option value="2" selected>2 ชั่วโมง / 2 Hours</option>
+                    <option value="3">3 ชั่วโมง / 3 Hours</option>
+                    <option value="4">4 ชั่วโมง / 4 Hours</option>
+                    <option value="6">6 ชั่วโมง / 6 Hours</option>
+                    <option value="8">8 ชั่วโมง / 8 Hours (ทั้งวัน)</option>
+                  </select>
                 </div>
                 <div class="form-group">
                   <label>วันที่เสร็จงาน / Completion Date</label>
@@ -293,7 +349,7 @@
                 </div>
 
                 <!-- ── Check-in / Check-out ── -->
-                <div class="form-group checkinout-group">
+                <div class="form-group checkinout-group" id="checkInTimeGroup">
                   <label>⏱️ เวลาเช็คอิน / Check-in Time</label>
                   <div class="time-input-wrap">
                     <input type="datetime-local" id="checkInTime" oninput="calcDuration()" />
@@ -302,7 +358,7 @@
                     </button>
                   </div>
                 </div>
-                <div class="form-group checkinout-group">
+                <div class="form-group checkinout-group" id="checkOutTimeGroup">
                   <label>⏱️ เวลาเช็คเอาท์ / Check-out Time</label>
                   <div class="time-input-wrap">
                     <input type="datetime-local" id="checkOutTime" oninput="calcDuration()" />
@@ -372,10 +428,18 @@
                 <div class="form-group">
                   <label>สถานะงาน / Status <span class="required">*</span></label>
                   <select id="jobStatus" required>
-                    <option value="pending">รอดำเนินการ (Pending)</option>
-                    <option value="in-progress">กำลังดำเนินการ (In Progress)</option>
+                    <option value="awaiting_approval">รออนุมัติ (Awaiting Approval)</option>
+                    <option value="pending">รอดำเนินการ / นัดหมายแล้ว (Pending/Scheduled)</option>
+                    <option value="accepted">ตอบรับงานแล้ว (Accepted)</option>
+                    <option value="in-progress">กำลังดำเนินการ / เช็คอินแล้ว (In Progress)</option>
                     <option value="completed">เสร็จแล้ว (Completed)</option>
                     <option value="cancelled">ยกเลิก (Cancelled)</option>
+                  </select>
+                </div>
+                <div class="form-group" id="jobApproverGroup">
+                  <label>ผู้อนุมัติงาน / Approver <span class="required">*</span></label>
+                  <select id="jobApprover">
+                    <option value="">-- เลือกผู้อนุมัติ --</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -390,11 +454,20 @@
                   <label>รายละเอียดอาการ / Problem Description <span class="required">*</span></label>
                   <textarea id="problemDesc" rows="3" placeholder="อธิบายอาการเสีย/งานที่ต้องทำ" required></textarea>
                 </div>
-                <div class="form-group form-group-full">
+                <!-- รูปภาพแจ้งปัญหา (สำหรับฝ่ายขายแนบ และฝ่ายบริการดูประกอบ) -->
+                <div class="form-group form-group-full" id="problemPhotoGroup" style="margin-top:12px;">
+                  <label>📸 รูปภาพแจ้งอาการเสีย/ปัญหา (Problem Photo)</label>
+                  <input type="file" id="problemPhotoInput" accept="image/*" onchange="previewProblemImage(this)" style="margin-bottom:8px;" />
+                  <div id="problemPhotoPreview" class="image-preview-container" style="border:1px dashed var(--border); border-radius:var(--radius-sm); width:100%; max-width:400px; height:180px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:var(--bg-card2);">
+                    <span style="color:var(--text-secondary); font-size:0.8rem;">ไม่มีตัวอย่างรูปภาพแจ้งปัญหา / No Image</span>
+                  </div>
+                  <input type="hidden" id="problemPhotoBase64" />
+                </div>
+                <div class="form-group form-group-full" id="workPerformedGroup">
                   <label>งานที่ดำเนินการ / Work Performed</label>
                   <textarea id="workPerformed" rows="3" placeholder="รายละเอียดงานที่ทำ"></textarea>
                 </div>
-                <div class="form-group form-group-full">
+                <div class="form-group form-group-full" id="operationSummaryGroup">
                   <label>สรุปการดำเนินงาน / Operation Summary</label>
                   <textarea id="operationSummary" rows="3" placeholder="สรุปภาพรวมการดำเนินงานหลังจากปฏิบัติหน้าที่เสร็จสิ้น"></textarea>
                 </div>
@@ -607,6 +680,7 @@
                     <h4>ข้อมูลงาน / Job Info</h4>
                     <table class="info-table">
                       <tr><td>ประเภทงาน</td><td id="rpt-job-type">-</td></tr>
+                      <tr><td>ผู้ประสานงานขาย</td><td id="rpt-creator">-</td></tr>
                       <tr><td>ช่างผู้รับผิดชอบ</td><td id="rpt-technician">-</td></tr>
                       <tr><td>อุปกรณ์</td><td id="rpt-equipment">-</td></tr>
                       <tr><td>วันที่นัดหมาย</td><td id="rpt-appointment">-</td></tr>
@@ -641,6 +715,8 @@
                   <div class="report-text-box" id="rpt-remarks" style="min-height:30px;"></div>
                 </div>
 
+
+
                 <div class="report-section" id="rpt-photos-section">
                   <h4 id="rpt-photos-title">รูปภาพการปฏิบัติงาน / Photo</h4>
                   <div class="report-photos-grid" id="rpt-photos-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:10px;">
@@ -648,16 +724,23 @@
                   </div>
                 </div>
 
-                <div class="signature-section" id="rpt-signature-section">
-                  <div class="signature-box">
-                    <div class="sig-line"></div>
-                    <div>ช่างผู้ให้บริการ / Technician</div>
-                    <div class="sig-date">วันที่ ____________</div>
+                <div class="signature-section" id="rpt-signature-section" style="display:flex; justify-content:space-between; gap:20px; margin-top:20px; border-top:1px solid #eee; padding-top:20px;">
+                  <!-- Left: Technician -->
+                  <div class="signature-box" style="flex:1; text-align:center;">
+                    <div class="sig-line" id="rpt-sig-line-tech" style="height:60px; display:flex; align-items:center; justify-content:center; border-bottom:1px solid #333; margin-bottom:8px; padding-top:0;"></div>
+                    <div id="rpt-sig-label-tech" style="font-size:0.8rem; color:#555;">ช่างผู้ให้บริการ (Technician)</div>
+                    <div class="sig-date" id="rpt-sig-date-tech" style="font-size:0.75rem; color:#777; margin-top:4px;">วันที่ ____________</div>
                   </div>
-                  <div class="signature-box">
-                    <div class="sig-line" id="rpt-sig-line-client" style="height:50px; display:flex; align-items:center; justify-content:center; border-bottom:1px solid #333; margin-bottom:8px;"></div>
-                    <div>ผู้จัดการ/ผู้รับมอบงาน (Manager / Client)</div>
-                    <div class="sig-date">วันที่ ____________</div>
+                  <div class="signature-box" style="flex:1; text-align:center;">
+                    <div class="sig-line" id="rpt-sig-line-approver" style="height:60px; display:flex; align-items:center; justify-content:center; border-bottom:1px solid #333; margin-bottom:8px; padding-top:0;"></div>
+                    <div id="rpt-sig-label-approver" style="font-size:0.8rem; color:#555;">ผู้จัดการ (Manager)</div>
+                    <div class="sig-date" id="rpt-sig-date-approver" style="font-size:0.75rem; color:#777; margin-top:4px;">วันที่ ____________</div>
+                  </div>
+                  <!-- Right: Customer -->
+                  <div class="signature-box" style="flex:1; text-align:center;">
+                    <div class="sig-line" id="rpt-sig-line-client" style="height:60px; display:flex; align-items:center; justify-content:center; border-bottom:1px solid #333; margin-bottom:8px; padding-top:0;"></div>
+                    <div id="rpt-sig-label-client" style="font-size:0.8rem; color:#555;">ผู้รับมอบงาน (Customer)</div>
+                    <div class="sig-date" id="rpt-sig-date-client" style="font-size:0.75rem; color:#777; margin-top:4px;">วันที่ ____________</div>
                   </div>
                 </div>
               </div>
@@ -667,28 +750,75 @@
       </div>
     </div>
 
-    <!-- ======================== TO-DO LIST PAGE ======================== -->
+    <!-- ======================== CALENDAR PAGE ======================== -->
     <div id="page-todo" class="page">
       <div class="card" style="padding:20px; display:flex; flex-direction:column; gap:16px;">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
           <div>
-            <h2 style="font-size:1.25rem; font-weight:700; margin:0;">📝 รายการสิ่งที่ต้องทำ / To-Do List</h2>
-            <p style="font-size:0.85rem; color:var(--text-secondary); margin:4px 0 0;">จัดการและเพิ่มข้อมูลการทำงานใน Google Sheets</p>
+            <h2 style="font-size:1.25rem; font-weight:700; margin:0;">🗓️ ปฏิทินจองคิวงานช่าง / Technician Booking Calendar</h2>
+            <p style="font-size:0.85rem; color:var(--text-secondary); margin:4px 0 0;">ตรวจสอบคิวนัดหมาย ตารางเดินรถ และคิวงานซ่อมของช่างเทคนิค</p>
           </div>
-          <a href="https://docs.google.com/spreadsheets/d/1Ci_1jgv0wxZipBqjVBmIxX-1jplW4mnPHaZzmVODXPs/edit?gid=651189864#gid=651189864" 
-             target="_blank" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
-            🔗 เปิดใน Google Sheets
-          </a>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <span style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);">เลือกเดือน / Month</span>
+              <input type="month" id="calendarMonth" class="form-control" style="padding:6px 12px; height:38px; min-width:160px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
+            </div>
+            <div style="display:flex; flex-direction:column; gap:4px;">
+              <span style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);">กรองช่าง / Filter Technician</span>
+              <select id="calendarTechFilter" class="form-control" style="padding:6px 12px; height:38px; min-width:180px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);">
+                <option value="">ช่างทั้งหมด / All Technicians</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div style="border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:#ffffff; box-shadow:var(--shadow-sm);">
-          <iframe src="https://docs.google.com/spreadsheets/d/1Ci_1jgv0wxZipBqjVBmIxX-1jplW4mnPHaZzmVODXPs/edit?gid=651189864&chrome=false&widget=false" 
-                  style="width:100%; height:700px; border:none; display:block;"
-                  allow="autoplay"></iframe>
+
+        <div class="calendar-layout-wrapper" style="display:grid; grid-template-columns: 2.5fr 1fr; gap:20px;">
+          <!-- Calendar Month Grid Container -->
+          <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px;">
+            <div style="display:grid; grid-template-columns: repeat(7, 1fr); text-align:center; font-weight:700; font-size:0.85rem; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              <span style="color:#ef4444;">อา (Sun)</span>
+              <span>จ (Mon)</span>
+              <span>อ (Tue)</span>
+              <span>พ (Wed)</span>
+              <span>พฤ (Thu)</span>
+              <span>ศ (Fri)</span>
+              <span style="color:var(--accent-blue);">ส (Sat)</span>
+            </div>
+            <div id="calendarGrid" style="display:grid; grid-template-columns: repeat(7, 1fr); gap:6px;">
+              <!-- Dynamic Calendar Days -->
+            </div>
+          </div>
+
+          <!-- Selected Day Details Container -->
+          <div class="card" style="padding:16px; display:flex; flex-direction:column; gap:12px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);">
+            <h3 style="font-size:1rem; font-weight:700; margin:0; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              📌 คิวงานประจำวันที่: <span id="calendarSelectedDateLabel" style="color:var(--accent-blue);">—</span>
+            </h3>
+            <div id="calendarSelectedDayJobs" style="display:flex; flex-direction:column; gap:8px; max-height:480px; overflow-y:auto; padding-right:4px;">
+              <div style="text-align:center; color:var(--text-secondary); padding:20px; font-size:0.85rem;">
+                กรุณาคลิกเลือกวันที่บนปฏิทินเพื่อดูรายละเอียดงาน
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- ======================== MAP PAGE ======================== -->
+    <div id="page-map" class="page">
+      <div class="map-layout">
+        <div class="card" style="padding:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-sm); position:relative;">
+          <div id="customerMap" style="width:100%; height:600px; z-index:1;"></div>
+        </div>
+        <div class="map-legend">
+          <h3>📌 รายชื่อและสถานะลูกค้า</h3>
+          <div id="mapLegendList" style="max-height: 520px; overflow-y: auto; display:flex; flex-direction:column; gap:8px;">
+            <!-- ดึงรายการลูกค้ามาใส่ด้วย JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ======================== TRAVEL CLAIM PAGE ======================== -->
     <div id="page-travel-claim" class="page">
       <div class="report-layout">
@@ -699,7 +829,7 @@
               <input type="hidden" id="editTravelClaimId" value="" />
               <div class="form-group">
                 <label>เลขที่ใบเบิก / Claim No.</label>
-                <input type="text" id="travelClaimNo" placeholder="TC-XXXX-XXX" required />
+                <input type="text" id="travelClaimNo" placeholder="ระบบรันอัตโนมัติเมื่อเลือกใบงาน" readonly required />
               </div>
               <div class="form-group">
                 <label>วันที่เบิก / Date</label>
@@ -781,6 +911,13 @@
                 </tbody>
               </table>
             </div>
+            <div class="pagination-bar" style="display:flex; align-items:center; justify-content:space-between; margin-top:15px; padding:10px 15px; background:var(--bg-card); border-top:1px solid var(--border); border-bottom-left-radius:var(--radius-sm); border-bottom-right-radius:var(--radius-sm);">
+              <div style="font-size:0.85rem; color:var(--text-secondary);" id="travelPaginationInfo">แสดง 0 ถึง 0 จาก 0 รายการ</div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-outline" id="btnTravelPrev" onclick="changeTravelPage(-1)" style="padding:6px 12px; font-size:0.8rem;">ก่อนหน้า</button>
+                <button class="btn-outline" id="btnTravelNext" onclick="changeTravelPage(1)" style="padding:6px 12px; font-size:0.8rem;">ถัดไป</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -796,7 +933,7 @@
               <input type="hidden" id="editOtClaimId" value="" />
               <div class="form-group">
                 <label>เลขที่ใบเบิก / Claim No.</label>
-                <input type="text" id="otClaimNo" placeholder="OT-XXXX-XXX" required />
+                <input type="text" id="otClaimNo" placeholder="ระบบรันอัตโนมัติเมื่อเลือกใบงาน" readonly required />
               </div>
               <div class="form-group">
                 <label>วันที่เบิก / Date</label>
@@ -874,6 +1011,13 @@
                 </tbody>
               </table>
             </div>
+            <div class="pagination-bar" style="display:flex; align-items:center; justify-content:space-between; margin-top:15px; padding:10px 15px; background:var(--bg-card); border-top:1px solid var(--border); border-bottom-left-radius:var(--radius-sm); border-bottom-right-radius:var(--radius-sm);">
+              <div style="font-size:0.85rem; color:var(--text-secondary);" id="otPaginationInfo">แสดง 0 ถึง 0 จาก 0 รายการ</div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn-outline" id="btnOtPrev" onclick="changeOtPage(-1)" style="padding:6px 12px; font-size:0.8rem;">ก่อนหน้า</button>
+                <button class="btn-outline" id="btnOtNext" onclick="changeOtPage(1)" style="padding:6px 12px; font-size:0.8rem;">ถัดไป</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -883,13 +1027,16 @@
     <div id="page-admin-settings" class="page">
       <div class="report-layout">
         <div class="report-controls">
+
+
           <div class="control-card">
-            <h3>🔔 ตั้งค่าระบบแจ้งเตือน / Line Notify</h3>
+            <h3>🤖 ตั้งค่าคีย์ AI / Gemini API Key</h3>
             <div class="form-group">
-              <label>Line Notify Token</label>
-              <input type="text" id="lineNotifyToken" placeholder="วาง Token ที่ได้จาก Line Notify" />
+              <label>Gemini API Key</label>
+              <input type="password" id="geminiApiKey" placeholder="AI_Key_..." style="width:100%; padding:10px; margin-top:6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
+              <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">ใช้สำหรับการคุยกับพนักงาน AI จริงผ่าน Google Gemini API หากไม่มีจะใช้โหมดจำลองแสนฉลาดออฟไลน์แทน</p>
             </div>
-            <button class="btn-primary btn-full" onclick="testLineNotify()">⚡ ทดสอบส่ง Line Notify</button>
+            <button class="btn-primary btn-full" onclick="saveGeminiApiKey()">💾 บันทึก Gemini API Key</button>
           </div>
 
           <div class="control-card">
@@ -901,6 +1048,14 @@
             <div class="form-group">
               <label>ที่อยู่บริษัท / Address</label>
               <textarea id="settingsCompanyAddress" rows="2">123 ถ.สุขุมวิท แขวงคลองตัน เขตคลองเตย กรุงเทพฯ 10110</textarea>
+            </div>
+            <div class="form-group">
+              <label>เบอร์โทร / Phone</label>
+              <input type="text" id="settingsCompanyPhone" value="02-XXX-XXXX" />
+            </div>
+            <div class="form-group">
+              <label>เลขที่ผู้เสียภาษี / Tax ID</label>
+              <input type="text" id="settingsCompanyTaxId" value="0-1234-56789-01-2" />
             </div>
             <button class="btn-primary btn-full" onclick="saveAdminCompanySettings()">💾 บันทึกข้อมูลบริษัท</button>
           </div>
@@ -917,12 +1072,8 @@
                 <input type="email" id="newEmpEmail" required placeholder="เช่น somchai@livelighting.com" />
               </div>
               <div class="form-group">
-                <label>บทบาท / Role</label>
-                <select id="newEmpRole" required>
-                  <option value="technician">ช่างเทคนิค (Technician)</option>
-                  <option value="manager">ผู้จัดการ (Manager)</option>
-                  <option value="admin">ผู้ดูแลระบบ/บัญชี (Admin)</option>
-                </select>
+                <label>บทบาทพนักงาน / Role</label>
+                <input type="text" id="newEmpRole" required placeholder="เช่น Service/คุณทอม หรือ ฝ่ายขาย/คุณติ๊ก" />
               </div>
               <button type="submit" class="btn-primary btn-full">➕ เพิ่มพนักงาน</button>
             </form>
@@ -939,8 +1090,8 @@
                 <thead>
                   <tr>
                     <th>ชื่อพนักงาน</th>
+                    <th>บทบาทพนักงาน / Role</th>
                     <th>อีเมลเข้าใช้งาน</th>
-                    <th>บทบาท / Role</th>
                     <th>การดำเนินการ</th>
                   </tr>
                 </thead>
@@ -983,6 +1134,306 @@
       </div>
     </div>
 
+    <!-- ======================== AI AGENTS PAGE ======================== -->
+    <div id="page-ai-agents" class="page">
+      <div class="ai-dashboard-wrap" style="display:flex; flex-direction:column; gap:20px;">
+        
+        <!-- Tab selector for AI Agents -->
+        <div class="ai-tabs-nav" style="display:flex; gap:10px; border-bottom:2px solid var(--border); padding-bottom:10px; overflow-x:auto;">
+          <button class="btn-period active" onclick="switchAIAgentTab('doc-ai')">📂 Document AI</button>
+          <button class="btn-period" onclick="switchAIAgentTab('email-ai')">✉️ Email AI</button>
+          <button class="btn-period" onclick="switchAIAgentTab('report-ai')">📝 Report Creator AI</button>
+          <button class="btn-period" onclick="switchAIAgentTab('audit-ai')">🔍 Claims Auditor AI</button>
+          <button class="btn-period" onclick="switchAIAgentTab('sec-ai')">👩‍💼 Personal Secretary</button>
+          <button class="btn-period" onclick="switchAIAgentTab('dev-ai')">🛠️ System & UI Dev</button>
+        </div>
+
+        <!-- 1. Document AI Section -->
+        <div id="ai-tab-doc-ai" class="ai-tab-content" style="display:block;">
+          <div class="report-layout">
+            <div class="report-controls" style="flex: 1 1 300px;">
+              <div class="control-card">
+                <h3>📁 อัปโหลดเอกสาร / Upload Document</h3>
+                <div id="docDropzone" class="upload-dropzone" style="border:2px dashed var(--border); border-radius:var(--radius-sm); padding:30px 10px; text-align:center; cursor:pointer; background:var(--bg-card2); transition:all var(--transition); margin-bottom:15px;" onclick="document.getElementById('docFileInput').click()">
+                  <span style="font-size:2rem; display:block; margin-bottom:8px;">📤</span>
+                  <span style="font-size:0.85rem; color:var(--text-secondary);">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่ออัปโหลด</span>
+                  <input type="file" id="docFileInput" style="display:none;" accept=".txt,.json,.pdf,.png,.jpg,.jpeg" onchange="handleDocUpload(event)" />
+                </div>
+                <h3>📄 รายการเอกสารในคลัง</h3>
+                <div id="uploadedDocsList" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto; margin-top:10px;">
+                  <!-- Dynamically populated files -->
+                </div>
+              </div>
+            </div>
+            <div class="report-preview-wrap" style="flex: 2 1 500px;">
+              <div class="control-card" style="height:500px; display:flex; flex-direction:column; justify-content:space-between;">
+                <div style="border-bottom:1px solid var(--border); padding-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                  <div>
+                    <h3 id="selectedDocTitle" style="margin:0; font-size:1rem; color:var(--text-primary);">โปรดเลือกเอกสาร...</h3>
+                    <span id="selectedDocMeta" style="font-size:0.75rem; color:var(--text-secondary);">—</span>
+                  </div>
+                  <button class="btn-outline" style="font-size:0.75rem; padding:4px 8px;" onclick="clearSelectedDoc()">ล้างข้อมูล</button>
+                </div>
+                <div id="docChatContainer" style="flex:1; overflow-y:auto; padding:15px 0; display:flex; flex-direction:column; gap:12px;">
+                  <div class="ai-chat-bubble system" style="background:var(--bg-card2); padding:10px 14px; border-radius:var(--radius-sm); font-size:0.85rem; line-height:1.5;">
+                    <span>สวัสดีค่ะ ฉันคือ **พนักงานจัดการเอกสาร AI** โปรดเลือกเอกสารในคลังเพื่อเริ่มต้นพูดคุย ค้นหาข้อมูล หรือสรุปเนื้อหาค่ะ</span>
+                  </div>
+                </div>
+                <div style="display:flex; gap:10px; border-top:1px solid var(--border); padding-top:15px;">
+                  <input type="text" id="docQueryInput" placeholder="ถามคำถามเกี่ยวกับเอกสารนี้..." style="flex:1; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary); outline:none;" onkeydown="if(event.key==='Enter') sendDocQuery()" />
+                  <button class="btn-primary" onclick="sendDocQuery()">ส่งคำถาม ⚡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Email AI Section -->
+        <div id="ai-tab-email-ai" class="ai-tab-content" style="display:none;">
+          <div class="report-layout">
+            <div class="report-controls" style="flex: 1 1 320px;">
+              <div class="control-card" style="padding:15px;">
+                <h3>✉️ กล่องข้อความลูกค้า / Client Inbox</h3>
+                <div id="emailInboxList" style="display:flex; flex-direction:column; gap:10px; margin-top:12px; max-height:480px; overflow-y:auto;">
+                  <!-- Dynamic emails -->
+                </div>
+              </div>
+            </div>
+            <div class="report-preview-wrap" style="flex: 2 1 500px;">
+              <div id="emailDetailView" class="control-card" style="display:none; flex-direction:column; gap:15px; min-height:480px;">
+                <div style="border-bottom:1px solid var(--border); padding-bottom:10px;">
+                  <h3 id="emailSubject" style="font-size:1.1rem; color:var(--text-primary); margin:0;">หัวข้ออีเมล</h3>
+                  <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:0.8rem; color:var(--text-secondary);">
+                    <span>ผู้ส่ง: <strong id="emailSender">—</strong></span>
+                    <span id="emailDate">—</span>
+                  </div>
+                  <div style="display:flex; gap:6px; margin-top:8px;" id="emailTags">
+                    <!-- Tags like Urgency, Category, Sentiment -->
+                  </div>
+                </div>
+                <div id="emailBodyText" style="background:var(--bg-card2); border-radius:var(--radius-sm); padding:15px; font-size:0.9rem; line-height:1.6; min-height:100px; max-height:200px; overflow-y:auto; border:1px solid var(--border); white-space:pre-wrap;">
+                  เนื้อหาอีเมลลูกค้า...
+                </div>
+                
+                <!-- AI Section -->
+                <div style="border-top:1px solid var(--border); padding-top:15px;">
+                  <h4 style="color:var(--accent-purple); font-size:0.95rem; margin-bottom:8px; display:flex; align-items:center; gap:6px;">🤖 ผลวิเคราะห์และข้อเสนอแนะโดย AI</h4>
+                  <div id="emailAiAnalysis" style="font-size:0.85rem; line-height:1.5; color:var(--text-secondary); margin-bottom:12px; display:flex; flex-direction:column; gap:6px;">
+                    <!-- Auto analysis details -->
+                  </div>
+                  <button class="btn-primary" onclick="generateEmailDraft()">ให้ AI ร่างจดหมายตอบกลับ 🪄</button>
+                </div>
+                
+                <!-- Draft section -->
+                <div id="emailDraftContainer" style="display:none; flex-direction:column; gap:8px;">
+                  <label style="font-weight:600; font-size:0.85rem;">📝 จดหมายร่างโดย AI (ปรับแต่งได้):</label>
+                  <textarea id="emailDraftTextarea" rows="6" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary); font-family:inherit; font-size:0.85rem; line-height:1.5; outline:none; resize:vertical;"></textarea>
+                  <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:4px;">
+                    <button class="btn-outline" onclick="copyEmailDraft()">📋 คัดลอกจดหมายร่าง</button>
+                    <button class="btn-success" onclick="sendMockEmailReply()">📧 ส่งอีเมลตอบกลับเสร็จสิ้น</button>
+                  </div>
+                </div>
+              </div>
+              <div id="emailNoSelection" class="control-card" style="height:480px; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-secondary);">
+                <span style="font-size:3rem; margin-bottom:12px;">📬</span>
+                <span>เลือกอีเมลในกล่องจดหมายด้านซ้าย เพื่อให้ AI ดำเนินการวิเคราะห์และร่างคำตอบค่ะ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Report Creator AI Section -->
+        <div id="ai-tab-report-ai" class="ai-tab-content" style="display:none;">
+          <div class="report-layout">
+            <div class="report-controls" style="flex: 1 1 350px;">
+              <div class="control-card">
+                <h3>🛠️ เขียนหรือวางบันทึกย่อหน้างาน / Raw Notes</h3>
+                <div style="margin-bottom:10px;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary);">เลือกใช้ข้อมูลตัวอย่างเพื่อทดสอบ:</span>
+                  <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+                    <button type="button" class="btn-outline" style="font-size:0.75rem; text-align:left; padding:6px 10px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" onclick="setRawNotesExample(1)">💡 ตัวอย่าง: บ้านคุณชลธิชา (ไฟกระพริบ/เปลี่ยนบัลลาสต์)</button>
+                    <button type="button" class="btn-outline" style="font-size:0.75rem; text-align:left; padding:6px 10px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" onclick="setRawNotesExample(2)">💡 ตัวอย่าง: บจก. พาวเวอร์ไบต์ (ติดตั้งโคมสปอตไลท์ใหม่)</button>
+                  </div>
+                </div>
+                <textarea id="rawNotesTextarea" rows="8" placeholder="เช่น: คุณรัชพล โทรมาแจ้งว่าแอร์ไม่เย็น ช่างประสิทธิ์เข้าหน้างานเวลาบ่ายโมงครึ่ง ตรวจสอบพบพัดลมพอยล์เย็นเสีย ทำการถอดเปลี่ยนอะไหล่พัดลมคอยล์เย็นแท้ขนาด 15W ตอนนี้ใช้งานได้ปกติ เก็บเงินสด 1,800 บาท รับประกัน 90 วัน" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary); font-family:inherit; font-size:0.85rem; outline:none; resize:none; line-height:1.5;"></textarea>
+                <button type="button" class="btn-primary btn-full" style="margin-top:12px;" onclick="parseRawNotes()">ให้ AI วิเคราะห์สกัดข้อมูล ⚡</button>
+              </div>
+            </div>
+            <div class="report-preview-wrap" style="flex: 2 1 500px;">
+              <div id="parsedReportCard" class="control-card" style="display:none; flex-direction:column; gap:15px; min-height:420px;">
+                <h3 style="color:var(--accent-green); border-bottom:1px solid var(--border); padding-bottom:8px; margin:0;">📊 ผลการสกัดข้อมูลการบริการจำแนกฟิลด์</h3>
+                <div class="form-grid" style="grid-template-columns:1fr 1fr; gap:12px;">
+                  <div class="form-group" style="margin-top:0;">
+                    <label>ชื่อลูกค้า / Customer Name</label>
+                    <input type="text" id="aiParsedCustomer" class="filter-select-wide" style="margin-top:4px;" />
+                  </div>
+                  <div class="form-group" style="margin-top:0;">
+                    <label>ประเภทงาน / Job Type</label>
+                    <select id="aiParsedJobType" class="filter-select-wide" style="margin-top:4px;">
+                      <option value="ซ่อม">ซ่อม (Repair)</option>
+                      <option value="ติดตั้ง">ติดตั้ง (Install)</option>
+                      <option value="PM">บำรุงรักษา PM</option>
+                      <option value="ตรวจสอบ">ตรวจสอบ</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="grid-column: span 2; margin-top:0;">
+                    <label>รายละเอียดอาการ / Problem Description</label>
+                    <textarea id="aiParsedProblem" rows="2" class="filter-select-wide" style="margin-top:4px; font-family:inherit; font-size:0.85rem;"></textarea>
+                  </div>
+                  <div class="form-group" style="grid-column: span 2; margin-top:0;">
+                    <label>งานที่ดำเนินการ / Work Performed</label>
+                    <textarea id="aiParsedWork" rows="3" class="filter-select-wide" style="margin-top:4px; font-family:inherit; font-size:0.85rem;"></textarea>
+                  </div>
+                  <div class="form-group" style="margin-top:0;">
+                    <label>อยู่ในรับประกัน / Warranty Status</label>
+                    <select id="aiParsedWarranty" class="filter-select-wide" style="margin-top:4px;">
+                      <option value="no">ไม่ใช่ (No)</option>
+                      <option value="yes">ใช่ (Yes)</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-top:0;">
+                    <label>หมายเหตุการรับประกัน / Remarks</label>
+                    <input type="text" id="aiParsedRemarks" class="filter-select-wide" style="margin-top:4px;" />
+                  </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; border-top:1px solid var(--border); padding-top:15px;">
+                  <button type="button" class="btn-outline" onclick="resetParsedReport()">ล้างข้อมูล</button>
+                  <button type="button" class="btn-success" onclick="transferParsedToForm()">ส่งข้อมูลเข้าฟอร์มใบงานใหม่ 📥</button>
+                </div>
+              </div>
+              <div id="parsedReportNoSelection" class="control-card" style="height:420px; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-secondary);">
+                <span style="font-size:3rem; margin-bottom:12px;">📊</span>
+                <span>ป้อนบันทึกดิบของงานบริการและกดปุ่มวิเคราะห์ด้านซ้าย เพื่อแปลงเป็นฟอร์มข้อมูลใบงานอัตโนมัติค่ะ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Claims Auditor AI Section -->
+        <div id="ai-tab-audit-ai" class="ai-tab-content" style="display:none;">
+          <div class="report-layout">
+            <div class="report-controls" style="flex: 1 1 300px;">
+              <div class="control-card">
+                <h3>🔍 เลือกรุ่นและใบเบิกตรวจสอบ</h3>
+                <div class="form-group">
+                  <label>ประเภทใบเบิก / Claim Type</label>
+                  <select id="auditClaimType" class="filter-select-wide" onchange="loadAuditClaimsList()">
+                    <option value="travel">เบิกค่าเดินทาง (Travel Claims)</option>
+                    <option value="ot">เบิก OT (Overtime Claims)</option>
+                  </select>
+                </div>
+                <div id="auditClaimsItemsContainer" style="display:flex; flex-direction:column; gap:8px; margin-top:15px; max-height:300px; overflow-y:auto;">
+                  <!-- Dynamic items to audit -->
+                </div>
+              </div>
+            </div>
+            <div class="report-preview-wrap" style="flex: 2 1 500px;">
+              <div id="auditResultCard" class="control-card" style="display:none; flex-direction:column; gap:15px; min-height:400px;">
+                <div style="border-bottom:1px solid var(--border); padding-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <h3 id="auditTitle" style="margin:0; font-size:1.05rem; color:var(--text-primary);">ผลตรวจสอบใบเบิก</h3>
+                  <span id="auditClaimStatus" class="badge">สถานะ</span>
+                </div>
+                <div id="auditClaimDetails" style="font-size:0.85rem; line-height:1.6; color:var(--text-secondary); background:var(--bg-card2); border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm);">
+                  <!-- details -->
+                </div>
+                <button type="button" class="btn-primary" onclick="runAiAudit()">รันระบบ AI ตรวจสอบพฤติกรรมและความสอดคล้อง ⚡</button>
+                <div id="auditReportDetails" style="display:none; flex-direction:column; gap:12px; border-top:1px solid var(--border); padding-top:15px;">
+                  <h4 style="color:var(--accent-orange); display:flex; align-items:center; gap:6px; margin:0 0 8px;">🕵️ รายงานความผิดปกติและการตรวจสอบ (Audit Findings):</h4>
+                  <div id="auditChecksList" style="display:flex; flex-direction:column; gap:8px;">
+                    <!-- Auto checks list -->
+                  </div>
+                </div>
+              </div>
+              <div id="auditNoSelection" class="control-card" style="height:400px; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-secondary);">
+                <span style="font-size:3rem; margin-bottom:12px;">🛡️</span>
+                <span>เลือกรายการใบเบิกที่ต้องการวิเคราะห์ความซื่อสัตย์และความถูกต้องด้านซ้ายมือค่ะ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Personal Secretary Section -->
+        <div id="ai-tab-sec-ai" class="ai-tab-content" style="display:none;">
+          <div class="control-card" style="height:550px; display:flex; flex-direction:column; justify-content:space-between;">
+            <div style="border-bottom:1px solid var(--border); padding-bottom:10px; display:flex; align-items:center; gap:10px;">
+              <span style="font-size:1.8rem;">👩‍💼</span>
+              <div>
+                <h3 style="margin:0; font-size:1.05rem;">เลขาเอไอส่วนตัว (น้องมีใจ)</h3>
+                <span style="font-size:0.75rem; color:var(--accent-green);">● กำลังประสานงานให้คุณ / Online</span>
+              </div>
+            </div>
+            <div id="secChatContainer" style="flex:1; overflow-y:auto; padding:15px 0; display:flex; flex-direction:column; gap:12px;">
+              <div class="ai-chat-bubble system" style="background:var(--bg-card2); padding:10px 14px; border-radius:var(--radius-sm); font-size:0.85rem; line-height:1.5; align-self: flex-start; max-width:80%;">
+                <span>สวัสดีค่ะพี่แอดมิน วันนี้น้องมีใจพร้อมช่วยประสานงานและสรุปข้อมูลให้แล้วค่ะ พี่แอดมินต้องการให้น้องมีใจช่วยสรุปอะไร หรือมีคำสั่งด่วนเรื่องไหนพิมพ์สั่งได้เลยนะคะ 💖</span>
+              </div>
+            </div>
+            
+            <!-- Quick Chips for Secretary -->
+            <div style="padding:8px 0; border-top:1px solid var(--border); display:flex; gap:8px; overflow-x:auto; flex-wrap:nowrap; align-items:center; width:100%; box-sizing:border-box;">
+              <span style="font-size:0.72rem; color:var(--text-secondary); white-space:nowrap;">คำสั่งด่วน:</span>
+              <button type="button" class="btn-outline" style="font-size:0.72rem; padding:4px 10px; white-space:nowrap; border-radius:15px; cursor:pointer;" onclick="sendSecretaryCommand('สรุปยอดสะสมใบเบิกเดินทางและโอที')">🚗 สรุปยอดเบิกจ่ายสะสม</button>
+              <button type="button" class="btn-outline" style="font-size:0.72rem; padding:4px 10px; white-space:nowrap; border-radius:15px; cursor:pointer;" onclick="sendSecretaryCommand('สรุปสถิติจำนวนงานแยกตามประเภท')">📊 สรุปประเภทงานบริการ</button>
+              <button type="button" class="btn-outline" style="font-size:0.72rem; padding:4px 10px; white-space:nowrap; border-radius:15px; cursor:pointer;" onclick="sendSecretaryCommand('มีพนักงานคนไหนบ้างในระบบที่กำลังปฏิบัติงาน')">👥 รายชื่อพนักงานและบทบาท</button>
+              <button type="button" class="btn-outline" style="font-size:0.72rem; padding:4px 10px; white-space:nowrap; border-radius:15px; cursor:pointer;" onclick="sendSecretaryCommand('จด To-Do ซื้อไขควงและเทปพันสายไฟเวลาบ่ายสอง')">📝 สั่งเลขาจด To-Do</button>
+            </div>
+            
+            <div style="display:flex; gap:10px; border-top:1px solid var(--border); padding-top:12px;">
+              <input type="text" id="secQueryInput" placeholder="พิมพ์ข้อความคุยหรือสั่งการเลขาที่นี่..." style="flex:1; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary); outline:none;" onkeydown="if(event.key==='Enter') sendSecretaryQuery()" />
+              <button type="button" class="btn-primary" onclick="sendSecretaryQuery()">สั่งงาน 🚀</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. System Developer & UI Specialist Section -->
+        <div id="ai-tab-dev-ai" class="ai-tab-content" style="display:none;">
+          <div class="report-layout">
+            <div class="report-controls" style="flex: 1 1 350px;">
+              <div class="control-card">
+                <h3>🛠️ ระบุปัญหาการใช้งานหรือสิ่งที่ต้องการแก้ไข / Diagnostics & UI Request</h3>
+                <div style="margin-bottom:10px;">
+                  <span style="font-size:0.75rem; color:var(--text-secondary);">ปัญหาด่วนที่มักพบในระบบ:</span>
+                  <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+                    <button type="button" class="btn-outline" style="font-size:0.75rem; text-align:left; padding:6px 10px; cursor:pointer;" onclick="setDevRequestExample(1)">📊 บอร์ดไม่แสดงรายการงาน (Jobs Not Loading)</button>
+                    <button type="button" class="btn-outline" style="font-size:0.75rem; text-align:left; padding:6px 10px; cursor:pointer;" onclick="setDevRequestExample(2)">🎨 ปุ่มซ้อนทับกันบนอุปกรณ์มือถือ (UI Spacing)</button>
+                    <button type="button" class="btn-outline" style="font-size:0.75rem; text-align:left; padding:6px 10px; cursor:pointer;" onclick="setDevRequestExample(3)">☁️ การซิงค์ Google Sheets ค้างรอดำเนินการ</button>
+                  </div>
+                </div>
+                <textarea id="devRequestTextarea" rows="6" placeholder="เช่น: โลโก้บริษัทหน้าใบเสร็จแสดงผลเพี้ยน หรือ แดชบอร์ดไม่มีข้อมูลสรุปรายปี..." style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary); font-family:inherit; font-size:0.85rem; outline:none; resize:none; line-height:1.5;"></textarea>
+                <button type="button" class="btn-primary btn-full" style="margin-top:12px;" onclick="submitDevRequest()">ให้ AI ตรวจสอบและซ่อมแซมระบบ ⚡</button>
+              </div>
+            </div>
+            <div class="report-preview-wrap" style="flex: 2 1 500px;">
+              <div id="devResultCard" class="control-card" style="display:none; flex-direction:column; gap:15px; min-height:420px;">
+                <h3 style="color:var(--accent-cyan); border-bottom:1px solid var(--border); padding-bottom:8px; margin:0; display:flex; align-items:center; gap:8px;">💻 รายงานการตรวจสอบและการแก้ไขโค้ด (Developer Logs)</h3>
+                
+                <div style="font-size:0.85rem; line-height:1.5;">
+                  <strong>🔍 ปัญหาที่วิเคราะห์พบ (Diagnosis):</strong>
+                  <div id="devAnalysisText" style="color:var(--text-secondary); background:var(--bg-card2); border:1px solid var(--border); padding:10px; border-radius:var(--radius-sm); margin-top:4px; font-size:0.82rem;">...</div>
+                </div>
+                
+                <div style="font-size:0.85rem; line-height:1.5;">
+                  <strong>💻 โค้ดชิ้นส่วนที่แก้ไข (Code Patch):</strong>
+                  <pre id="devCodePatch" style="background:#0f1117; color:#38bdf8; padding:12px; border-radius:var(--radius-sm); overflow-x:auto; margin-top:4px; font-family:'Courier New', monospace; font-size:0.78rem; border:1px solid var(--border); max-height:180px;">...</pre>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; border-top:1px solid var(--border); padding-top:15px;">
+                  <button type="button" class="btn-outline" onclick="resetDevRequest()">ล้างหน้าจอ</button>
+                  <button type="button" class="btn-success" onclick="applyAIPatch()">⚡ อัปโหลดและเขียนทับโค้ด (Apply Patch)</button>
+                </div>
+              </div>
+              
+              <div id="devNoSelection" class="control-card" style="height:420px; display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-secondary);">
+                <span style="font-size:3rem; margin-bottom:12px;">🛠️</span>
+                <span>ป้อนรายงานปัญหาหน้าเว็บ/ตารางงานไม่ขึ้นด้านซ้าย และกดวิเคราะห์เพื่อให้ AI วิศวกรซ่อมแซมระบบโปรแกรมของท่านทันทีค่ะ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
   </main>
 
   <!-- Modal: View/Edit Job -->
@@ -1004,7 +1455,7 @@
 
   <!-- Modal: View Claim Details & Approval -->
   <div class="modal-overlay" id="claimModal" onclick="closeModal(event)">
-    <div class="modal-box" id="claimModalBox" style="max-width: 600px;">
+    <div class="modal-box" id="claimModalBox" style="max-width: 850px; width: 90%;">
       <div class="modal-header">
         <h3 id="claimModalTitle">รายละเอียดใบเบิกเงิน / Claim Details</h3>
         <button class="modal-close" onclick="closeClaimModal()">✕</button>
@@ -1018,51 +1469,7 @@
     </div>
   </div>
 
-  <!-- Modal: Google Sheets Sync Settings -->
-  <div class="modal-overlay" id="sheetsModal" onclick="closeModal(event)">
-    <div class="modal-box" style="max-width: 600px;">
-      <div class="modal-header">
-        <h3>☁️ เชื่อมต่อ Google Sheets Database</h3>
-        <button class="modal-close" onclick="closeSheetsModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div style="display:flex; flex-direction:column; gap:12px;">
-          <div class="form-group">
-            <label style="font-weight:600; color:var(--text-primary);">Google Apps Script Web App URL:</label>
-            <input type="url" id="sheetsApiUrl" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%; padding:10px; margin-top:6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-card2); color:var(--text-primary);" />
-          </div>
-          
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; gap:8px;">
-              <button class="btn-primary" onclick="testAndSyncSheets()" style="flex:1;">💾 บันทึกและเชื่อมต่อ</button>
-              <button class="btn-danger" onclick="disconnectSheets()" style="flex:1;">🔌 ยกเลิกการเชื่อมต่อ</button>
-            </div>
-            <button class="btn-success" id="syncPendingBtn" onclick="syncPendingQueue()" style="width:100%; display:none; align-items:center; justify-content:center; gap:8px;">🔄 ซิงค์รายการคงค้างที่รอดำเนินการ (0)</button>
-          </div>
-          
-          <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
-          
-          <h4 style="margin:0; font-weight:600; color:var(--accent-blue);">💡 ขั้นตอนการติดตั้งและการเชื่อมต่อ:</h4>
-          <ol style="margin:0; padding-left:20px; font-size:0.82rem; line-height:1.6; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;">
-            <li>สร้าง **Google Sheet** เปล่าขึ้นมา 1 ไฟล์</li>
-            <li>ที่เมนูด้านบน คลิก **ส่วนขยาย (Extensions) > Apps Script**</li>
-            <li>ลบโค้ดเก่าออก แล้ววางโค้ดจากปุ่มด้านล่างนี้ลงไป</li>
-            <li>คลิก **การทำให้ใช้งานได้ (Deploy) > การทำให้ใช้งานได้ใหม่ (New Deployment)**</li>
-            <li>เลือกประเภทเป็น **เว็บแอป (Web App)**</li>
-            <li>ตั้งค่าการเข้าถึง: **เรียกใช้เป็น (Execute as): "ฉัน (Me)"** และ **ผู้มีสิทธิ์เข้าถึง (Who has access): "ทุกคน (Anyone)"**</li>
-            <li>คลิก **Deploy (ทำให้ใช้งานได้)** จากนั้นคัดลอก **URL เว็บแอป (Web App URL)** มาวางลงในช่องด้านบน</li>
-          </ol>
-          
-          <button class="btn-outline" onclick="copyAppsScriptCode()" style="margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px; width:100%;">
-            📋 คัดลอกโค้ด Google Apps Script
-          </button>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-outline" onclick="closeSheetsModal()">ปิด</button>
-      </div>
-    </div>
-  </div>
+
 
   <!-- Login Overlay Screen -->
   <div id="loginOverlay" class="login-overlay active">
@@ -1072,56 +1479,142 @@
         <h2>Live Lighting</h2>
         <p>ระบบจัดการงานบริการ & ใบเบิกค่าเดินทาง/OT</p>
       </div>
+      <!-- Login Form -->
       <form id="loginForm" onsubmit="handleLoginSubmit(event)">
         <div class="form-group" style="text-align:left;">
           <label>อีเมลเข้าใช้งาน / Username Email</label>
-          <input type="email" id="loginEmail" required placeholder="เช่น somchai@livelighting.com" />
+          <input type="text" id="loginEmail" required placeholder="เช่น somchai@livelighting.com หรือ admin" />
         </div>
         <div class="form-group" style="text-align:left;">
           <label>รหัสผ่าน / Password</label>
-          <input type="password" id="loginPassword" required placeholder="กรอกรหัสผ่าน (ระบุ 123456 สำหรับ Demo)" />
+          <input type="password" id="loginPassword" required placeholder="กรอกรหัสผ่าน" />
         </div>
         <button type="submit" class="btn-primary btn-full btn-lg" style="margin-top:12px;">🔓 เข้าสู่ระบบ</button>
       </form>
-      <div style="margin-top:12px; text-align:right;">
-        <a href="#" id="toggleDemoLink" onclick="toggleDemoOptions(event)" style="font-size:0.75rem; color:var(--text-secondary); text-decoration:underline;">🔧 แสดงตัวเลือกบัญชีทดลอง (Demo Options)</a>
+    </div>
+  </div>
+
+
+  <!-- Modal กำหนดสิทธิ์พนักงาน (Detailed Permissions Configuration) -->
+  <div id="permissionsModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:500px; background:var(--bg-card); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg);">
+      <div class="modal-header" style="border-bottom:1px solid var(--border); padding-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+        <h3 id="permModalTitle" style="margin:0; font-size:1.15rem; color:var(--text-primary);">⚙️ กำหนดสิทธิ์พนักงาน</h3>
+        <span class="close" onclick="closePermissionsModal()" style="cursor:pointer; font-size:1.5rem; color:var(--text-secondary);">&times;</span>
       </div>
-      
-      <div id="demoAccountsSection" style="display:none; transition:all 0.3s ease;">
-        <div class="login-divider" style="margin:20px 0; border-bottom:1px solid var(--border); position:relative; text-align:center;">
-          <span style="background:var(--bg-card); padding:0 10px; font-size:0.75rem; color:var(--text-secondary); position:relative; top:-9px;">หรือทดลองใช้งานระบบผ่าน Demo Accounts</span>
+      <div class="modal-body" style="padding:20px 0; display:flex; flex-direction:column; gap:16px;">
+        <input type="hidden" id="permEmail" />
+        
+        <div>
+          <span style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">พนักงาน / Employee</span>
+          <strong id="permEmployeeName" style="font-size:1.05rem; color:var(--text-primary);">—</strong>
+          <span id="permEmployeeEmail" style="font-size:0.85rem; color:var(--text-secondary); display:block;">—</span>
         </div>
-        <div class="demo-buttons">
-          <button class="btn-outline btn-full" onclick="quickLogin('technician')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
-            <span>👤</span> ช่างเทคนิค (สมชาย แสงดี)
-          </button>
-          <button class="btn-outline btn-full" onclick="quickLogin('manager')" style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
-            <span>💼</span> ผู้จัดการ/หัวหน้า (วิชัย)
-          </button>
-          <button class="btn-outline btn-full" onclick="quickLogin('admin')" style="display:flex; align-items:center; justify-content:center; gap:8px;">
-            <span>👑</span> แอดมิน/บัญชี (Live Lighting)
-          </button>
+
+        <div style="border-top:1px solid var(--border); padding-top:16px;">
+          <strong style="font-size:0.9rem; color:var(--text-primary); display:block; margin-bottom:12px;">สิทธิ์การเข้าถึงข้อมูลและการดำเนินการ (Action Permissions):</strong>
+          
+          <div style="display:grid; grid-template-columns:1fr; gap:12px;">
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_viewJobs" style="width:18px; height:18px; cursor:pointer;" /> ดูรายการงานทั้งหมด (View Jobs)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_editJobs" style="width:18px; height:18px; cursor:pointer;" /> เพิ่ม/แก้ไขงาน (Add/Edit Jobs)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_deleteJobs" style="width:18px; height:18px; cursor:pointer;" /> ลบงาน (Delete Jobs)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_approveJobs" style="width:18px; height:18px; cursor:pointer;" /> อนุมัติงานบริการใหม่ (Approve Service Jobs)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_travelClaims" style="width:18px; height:18px; cursor:pointer;" /> เบิกค่าเดินทาง (Travel Claims)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_otClaims" style="width:18px; height:18px; cursor:pointer;" /> เบิก OT (OT Claims)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_approveClaims" style="width:18px; height:18px; cursor:pointer;" /> อนุมัติใบเบิกเงิน (Approve Claims)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_payroll" style="width:18px; height:18px; cursor:pointer;" /> ดูรายงานบัญชี/Payroll (View Payroll)
+            </label>
+            <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="p_adminSettings" style="width:18px; height:18px; cursor:pointer;" /> เข้าหน้าตั้งค่าแอดมิน (Access Settings)
+            </label>
+          </div>
         </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border); padding-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-outline" onclick="closePermissionsModal()">ยกเลิก</button>
+        <button class="btn-primary" onclick="saveEmployeePermissions()">💾 บันทึกสิทธิ์</button>
       </div>
     </div>
   </div>
 
-  <!-- Floating Test Role Switcher -->
-  <div class="role-switcher-widget" id="roleSwitcherWidget" style="display:none;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:10px;">
-      <div class="widget-title">⚙️ สลับสิทธิ์ทดสอบ</div>
-      <button onclick="document.getElementById('roleSwitcherWidget').style.display='none'" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-weight:bold; font-size:0.85rem; padding:0 3px;">✕</button>
+  <!-- Approve Job Modal with Signature Pad -->
+  <div id="approveJobModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:500px; background:var(--bg-card); border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); border:1px solid var(--border);">
+      <div class="modal-header" style="border-bottom:1px solid var(--border); padding-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:1.15rem; color:var(--text-primary);">✍️ เซ็นอนุมัติงานบริการ</h3>
+        <span class="close" onclick="closeApproveJobModal()" style="cursor:pointer; font-size:1.5rem; color:var(--text-secondary);">&times;</span>
+      </div>
+      <div class="modal-body" style="padding:20px 0; display:flex; flex-direction:column; gap:16px;">
+        <input type="hidden" id="approveJobId" />
+        <div>
+          <span style="font-size:0.8rem; color:var(--text-secondary); display:block; margin-bottom:4px;">งานบริการ / Job No.</span>
+          <strong id="approveJobNo" style="font-size:1.05rem; color:var(--text-primary);">—</strong>
+          <span id="approveCustomerName" style="font-size:0.85rem; color:var(--text-secondary); display:block;">—</span>
+        </div>
+        <div>
+          <label style="font-weight:600; color:var(--text-primary); margin-bottom:8px; display:block;">ลายเซ็นผู้อนุมัติ / Approver Signature</label>
+          <div class="signature-pad-wrap" style="border:1px dashed var(--border); border-radius:var(--radius); background:var(--bg-card2); padding:12px; width:100%; box-sizing:border-box;">
+            <canvas id="approveSignatureCanvas" width="376" height="150" style="background:#ffffff; border-radius:var(--radius-sm); border:1px solid var(--border); touch-action:none; width:100%; display:block; cursor:crosshair;"></canvas>
+            <button type="button" class="btn-outline" style="font-size:0.75rem; padding:6px 12px; border-radius:4px; margin-top:8px;" onclick="clearApproveSignatureCanvas()">ล้างลายเซ็น</button>
+          </div>
+          <input type="hidden" id="approveJobSignature" />
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--border); padding-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn-outline" onclick="closeApproveJobModal()">ยกเลิก</button>
+        <button class="btn-primary" onclick="confirmApproveJob()">💾 ยืนยันการอนุมัติ</button>
+      </div>
     </div>
-    <div class="widget-body" style="display:flex; gap:6px;">
-      <button class="btn-period active" id="switch-role-technician" onclick="switchRole('technician')">ช่าง</button>
-      <button class="btn-period" id="switch-role-manager" onclick="switchRole('manager')">ผจก.</button>
-      <button class="btn-period" id="switch-role-admin" onclick="switchRole('admin')">แอดมิน</button>
+  </div>
+
+  <!-- Modal: Change Password -->
+  <div class="modal-overlay" id="changePasswordModal" onclick="closeChangePasswordModal(event)" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; justify-content:center; align-items:center;">
+    <div class="modal-box" style="max-width: 400px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-md); padding:20px; width:90%; animation:modalFadeIn 0.2s ease;">
+      <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:12px;">
+        <h3 style="margin:0; display:flex; align-items:center; gap:8px;">🔑 เปลี่ยนรหัสผ่านใหม่</h3>
+        <button class="modal-close-btn" onclick="closeChangePasswordModal(null)" style="background:transparent; border:none; color:var(--text-secondary); cursor:pointer; font-size:1.2rem;">✕</button>
+      </div>
+      <form id="changePasswordForm" onsubmit="handleChangePassword(event)">
+        <div class="modal-body" style="display:flex; flex-direction:column; gap:12px; padding:16px 0;">
+          <div class="form-group">
+            <label for="oldPassword" style="font-weight:600; display:block; margin-bottom:6px; font-size:0.9rem;">รหัสผ่านเดิม</label>
+            <input type="password" id="oldPassword" required style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-main); color:var(--text-primary); outline:none;" />
+          </div>
+          <div class="form-group">
+            <label for="newPassword" style="font-weight:600; display:block; margin-bottom:6px; font-size:0.9rem;">รหัสผ่านใหม่</label>
+            <input type="password" id="newPassword" required style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-main); color:var(--text-primary); outline:none;" />
+          </div>
+          <div class="form-group">
+            <label for="confirmNewPassword" style="font-weight:600; display:block; margin-bottom:6px; font-size:0.9rem;">ยืนยันรหัสผ่านใหม่</label>
+            <input type="password" id="confirmNewPassword" required style="width:100%; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-main); color:var(--text-primary); outline:none;" />
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top:1px solid var(--border); padding-top:12px; display:flex; justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn-outline" onclick="closeChangePasswordModal(null)">ยกเลิก</button>
+          <button type="submit" class="btn-primary">💾 บันทึกรหัสผ่าน</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- Toast Notification -->
   <div class="toast" id="toast"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2.2"></script>
 </body>
 </html>
