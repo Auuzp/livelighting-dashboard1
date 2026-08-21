@@ -712,18 +712,7 @@ function getDashboardPeriodJobs() {
 
   let filteredJobs = jobs;
 
-  // Filter out awaiting_approval jobs for unauthorized users
-  if (currentUser) {
-    filteredJobs = filteredJobs.filter(j => {
-      if (currentUser.role === 'admin') return true;
-      if (j.status === 'awaiting_approval') {
-        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
-        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
-        return isApprover || isCreator;
-      }
-      return true;
-    });
-  }
+
 
   return filteredJobs.filter(j => {
     if (!j.date) return false;
@@ -1053,17 +1042,7 @@ function renderRecentTable() {
   const tbody = document.getElementById('recentTableBody');
   let myJobs = jobs;
 
-  if (currentUser) {
-    myJobs = myJobs.filter(j => {
-      if (currentUser.role === 'admin') return true;
-      if (j.status === 'awaiting_approval') {
-        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
-        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
-        return isApprover || isCreator;
-      }
-      return true;
-    });
-  }
+
 
   const recent = [...myJobs].sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 8);
   if (!recent.length) {
@@ -1094,18 +1073,7 @@ function getFilteredJobs() {
 
   let filteredJobs = jobs;
 
-  // Filter out awaiting_approval jobs for unauthorized users
-  if (currentUser) {
-    filteredJobs = filteredJobs.filter(j => {
-      if (currentUser.role === 'admin') return true;
-      if (j.status === 'awaiting_approval') {
-        const isApprover = (j.approver && j.approver.toLowerCase() === currentUser.email.toLowerCase());
-        const isCreator = (j.createdBy && j.createdBy.toLowerCase() === currentUser.email.toLowerCase());
-        return isApprover || isCreator;
-      }
-      return true;
-    });
-  }
+
 
   return filteredJobs.filter(j => {
     const matchSearch = !search || (j.jobNo||'').toLowerCase().includes(search) || (j.customerName||'').toLowerCase().includes(search) || (j.technician||'').toLowerCase().includes(search);
