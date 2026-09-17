@@ -192,8 +192,24 @@ app.post('/api/change-password', async (req, res) => {
   }
 });
 
-// API Endpoint: Diagnostics
+// Health check endpoint (Render and monitoring)
+app.get('/healthz', async (req, res) => {
+  try {
+    const isHealthy = await db.ping();
+    if (isHealthy) {
+      return res.status(200).json({ status: 'ok' });
+    }
+    return res.status(503).json({ status: 'unavailable' });
+  } catch {
+    return res.status(503).json({ status: 'unavailable' });
+  }
+});
+
+// API Endpoint: Diagnostics (Development/Test only when explicitly enabled)
 app.get('/api/diagnose', async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DIAGNOSTICS !== 'true') {
+    return res.status(404).send('Cannot GET /api/diagnose');
+  }
   try {
     const report = await db.diagnose();
     res.json(report);
@@ -208,6 +224,10 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
