@@ -101,6 +101,22 @@ async function initSchema() {
 const dbModule = {
   hashPassword,
   initSchema,
+
+  async ping() {
+    try {
+      if (dbType === 'postgres') {
+        if (!pgPool) return false;
+        const res = await pgPool.query("SELECT 1");
+        return Boolean(res && res.rows && res.rows.length > 0);
+      } else {
+        if (!sqliteDb) return false;
+        const res = sqliteDb.prepare("SELECT 1 as alive").get();
+        return Boolean(res && res.alive === 1);
+      }
+    } catch {
+      return false;
+    }
+  },
   
   async getJobs() {
     if (dbType === 'postgres') {
