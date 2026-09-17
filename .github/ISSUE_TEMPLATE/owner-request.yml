@@ -1,0 +1,33 @@
+name: Owner Request
+description: Owner creates a business or product request for ChatGPT to design and Gemini to implement
+title: "[OWNER] "
+labels: ["role:owner", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Owner states the outcome here. ChatGPT converts it into acceptance criteria before Gemini starts implementation.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Business goal
+      description: What outcome should this create for customers or the organization?
+    validations:
+      required: true
+  - type: textarea
+    id: users
+    attributes:
+      label: Users and current problem
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or deadline
+      description: Include compliance, budget, permissions, or operating-cost limits when relevant.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or attachments
+      description: Add only non-secret information. Never post credentials or personal customer data.
+

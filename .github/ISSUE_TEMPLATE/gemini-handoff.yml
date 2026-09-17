@@ -1,0 +1,33 @@
+name: Gemini Handoff
+description: Gemini reports implementation evidence for ChatGPT review
+title: "[GEMINI HANDOFF] "
+labels: ["role:gemini", "status:review"]
+body:
+  - type: input
+    id: request
+    attributes:
+      label: Owner request
+      description: Link the originating issue.
+      placeholder: "#123"
+    validations:
+      required: true
+  - type: textarea
+    id: changes
+    attributes:
+      label: Changed files and behavior
+      description: Concise deltas only; do not paste complete source files.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification and exact results
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Known risks, limitations, or decisions needed
+    validations:
+      required: true
+
