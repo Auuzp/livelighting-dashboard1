@@ -92,8 +92,8 @@ async function initSchema() {
     // Seed default settings if empty
     const countSettings = sqliteDb.prepare("SELECT COUNT(*) as count FROM settings").get();
     if (countSettings.count === 0) {
-      sqliteDb.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('company', JSON.stringify(defaultCompany));
-      sqliteDb.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('lineToken', '');
+      sqliteDb.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run('company', JSON.stringify(defaultCompany));
+      sqliteDb.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run('lineToken', '');
       console.log('Local SQLite default settings seeded.');
     }
   }
