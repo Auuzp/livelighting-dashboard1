@@ -9,7 +9,8 @@ const defaultEmployees = [
   { name: 'สมชาย แสงดี', email: 'somchai@livelighting.com', role: 'service', password: hashPassword('123') },
   { name: 'กิตติพงษ์ สว่าง', email: 'kittipong@livelighting.com', role: 'service', password: hashPassword('123') },
   { name: 'ฝ่ายขาย Live Lighting', email: 'sale@livelighting.com', role: 'sale', password: hashPassword('123') },
-  { name: 'ผู้ดูแลระบบสูงสุด', email: 'admin', role: 'admin', password: hashPassword('P@ssw0rd') }
+  { name: 'ผู้ดูแลระบบสูงสุด', email: 'admin', role: 'admin', password: hashPassword('P@ssw0rd') },
+  { name: 'คุณทอม', email: 'tom@livelighting.com', role: 'admin', password: hashPassword('123') }
 ];
 
 const defaultCompany = {
@@ -56,18 +57,17 @@ async function initSchema() {
   if (dbType === 'postgres') {
     await pgPool.query(ddl);
     
-    // Seed default employees if empty
-    const res = await pgPool.query("SELECT COUNT(*) FROM employees");
-    if (parseInt(res.rows[0].count) === 0) {
-      for (const emp of defaultEmployees) {
-        await pgPool.query(
-          "INSERT INTO employees (email, data) VALUES ($1, $2)",
-          [emp.email, JSON.stringify(emp)]
-        );
-      }
-      console.log('Cloud Postgres default employees seeded.');
+    // Backfill any missing built-in accounts without overwriting existing employee data.
+    let seededEmployees = 0;
+    for (const emp of defaultEmployees) {
+      const result = await pgPool.query(
+        "INSERT INTO employees (email, data) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING",
+        [emp.email, JSON.stringify(emp)]
+      );
+      seededEmployees += result.rowCount || 0;
     }
-    
+    if (seededEmployees > 0) console.log('Cloud Postgres built-in employees backfilled.');
+
     // Seed default settings if empty
     const resSettings = await pgPool.query("SELECT COUNT(*) FROM settings");
     if (parseInt(resSettings.rows[0].count) === 0) {
@@ -78,21 +78,22 @@ async function initSchema() {
   } else {
     sqliteDb.exec(ddl);
     
-    // Seed default employees if empty
-    const countEmp = sqliteDb.prepare("SELECT COUNT(*) as count FROM employees").get();
-    if (countEmp.count === 0) {
-      const insert = sqliteDb.prepare("INSERT INTO employees (email, data) VALUES (?, ?)");
-      for (const emp of defaultEmployees) {
-        insert.run(emp.email, JSON.stringify(emp));
-      }
-      console.log('Local SQLite default employees seeded.');
+    // Backfill any missing built-in accounts without overwriting existing employee data.
+    const insertEmployee = sqliteDb.prepare(
+      "INSERT OR IGNORE INTO employees (email, data) VALUES (?, ?)"
+    );
+    let seededEmployees = 0;
+    for (const emp of defaultEmployees) {
+      const result = insertEmployee.run(emp.email, JSON.stringify(emp));
+      seededEmployees += Number(result.changes || 0);
     }
+    if (seededEmployees > 0) console.log('Local SQLite built-in employees backfilled.');
     
     // Seed default settings if empty
     const countSettings = sqliteDb.prepare("SELECT COUNT(*) as count FROM settings").get();
     if (countSettings.count === 0) {
-      sqliteDb.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run('company', JSON.stringify(defaultCompany));
-      sqliteDb.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run('lineToken', '');
+      sqliteDb.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('company', JSON.stringify(defaultCompany));
+      sqliteDb.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('lineToken', '');
       console.log('Local SQLite default settings seeded.');
     }
   }
