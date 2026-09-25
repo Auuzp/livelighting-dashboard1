@@ -374,10 +374,11 @@ async function asyncInitData() {
 
     // 2. Fetch employees
     const empRes = await fetch('/api/employees');
-    if (empRes.ok) {
-      employees = await empRes.json();
-      localStorage.setItem('servicell1_employees', JSON.stringify(employees));
-    }
+    if (!empRes.ok) throw new Error('Employee list request failed');
+    const serverEmployees = await empRes.json();
+    if (!Array.isArray(serverEmployees)) throw new Error('Employee list response was invalid');
+    employees = serverEmployees;
+    localStorage.setItem('servicell1_employees', JSON.stringify(employees));
 
     // 3. Fetch jobs
     const jobsRes = await fetch('/api/jobs');
@@ -3134,6 +3135,11 @@ function rejectClaim(type, id) {
 function renderEmployeeTable() {
   const tbody = document.getElementById('employeeTableBody');
   if (!tbody) return;
+
+  if (!Array.isArray(employees) || employees.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-secondary); padding:24px;">ไม่พบรายชื่อพนักงานในฐานข้อมูล</td></tr>';
+    return;
+  }
   
   tbody.innerHTML = employees.map(emp => {
     const roleNames = {
