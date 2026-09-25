@@ -1,16 +1,18 @@
 # ChatGPT Review
 
-## Decision: CHANGES_REQUESTED
+## Decision: APPROVED
 
 ## Evidence checked
 - Reviewed the PR diff for `db.js`, `app.js`, and `test/employees.test.js`.
 - Focused SQLite regression: 1/1 passed.
 - Full `npm test`: 8/8 passed.
-- Current PR is mergeable; CodeRabbit status is success. No PR-triggered GitHub Actions test run is available.
-- PostgreSQL and deployed runtime were not exercised.
+- CodeRabbit status: success. No GitHub Actions test run is configured for this PR.
+- Existing employee rows are preserved by insert-if-absent backfill semantics.
+- Owner explicitly confirmed the restoration of missing built-in admin accounts.
 
-## Findings
-- **Owner decision required — privileged account restoration:** `db.js` now recreates any missing built-in employee during every startup, including admin-role accounts with default credentials declared in the repository. This can restore admin access on an existing non-empty production database. The current user request concerns employee visibility and does not explicitly authorize restoring privileged accounts.
+## Residual risk
+- PostgreSQL backfill and the deployed runtime have not been tested.
+- Admin accounts are restored with the built-in credentials declared in the application defaults; the Owner authorized this behavior.
 
 ## Required revisions
-- Owner must confirm that the application should restore missing built-in admin accounts and their default credentials in existing databases, or narrow the migration to an approved account policy before merge.
+- None.
